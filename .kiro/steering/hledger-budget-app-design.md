@@ -11,10 +11,11 @@ This is a living design document. Update it as features are built.
 
 A Nuxt 4 web app that wraps the hledger CLI in a friendly budgeting UI. All accounting logic lives in hledger — the app is a thin layer that executes CLI commands and presents the results using Nuxt UI components.
 
-- Framework: Nuxt 4
-- UI: Nuxt UI (not raw Vue components)
+- Framework: Nuxt 4 (nuxt ^3.16.0 with compatibilityDate 2025-01-01)
+- UI: Nuxt UI v3 (@nuxt/ui ^3.0.0) — not raw HTML or hand-rolled Vue components
 - Data: hledger plain-text journal files on disk
 - Runtime: Docker Compose — single container with Nuxt + hledger, journal data on a volume
+- Testing: Vitest + fast-check for property-based testing
 
 ## Architecture
 
@@ -23,17 +24,62 @@ Browser (Nuxt UI)  →  Nuxt 4 Server (Nitro)  →  hledger CLI  →  .journal f
 ```
 
 - The frontend talks to Nitro API routes under `/api/`
-- Nitro routes spawn `hledger` child processes with `--output-format json`
+- Nitro routes spawn `hledger` child processes with `-O json`
 - hledger reads/writes `.journal` files — the app never reimplements accounting rules
-- Journal file path comes from `LEDGER_FILE` env var or app config
+- Journal file path comes from `LEDGER_FILE` env var (default: `/data/main.journal`)
+- Server utils in `server/utils/` are auto-imported by Nitro — no manual imports needed
+
+## Project Structure (Current)
+
+```
+├── app.vue                          # Minimal <NuxtPage /> shell
+├── nuxt.config.ts                   # @nuxt/ui module, devtools
+├── tsconfig.json                    # Standalone TS config (ES2022 target, node types)
+├── vitest.config.ts                 # Vitest with esbuild tsconfigRaw workaround
+├── package.json                     # nuxt, @nuxt/ui, vitest, fast-check, @types/node
+├── Dockerfile                       # Multi-stage: Node 20 Alpine + hledger
+├── docker-compose.yml               # Single app service, journal-data volume
+├── types/
+│   ├── hledger.ts                   # HledgerAmount, HledgerPosting, HledgerTransaction, etc.
+│   └── api.ts                       # TransactionInput, PostingInput, BalanceQuery, etc.
+├── server/
+│   ├── utils/
+│   │   ├── hledger.ts               # resolveJournalPath, hledgerExec, addTransaction
+│   │   └── __tests__/
+│   │       └── hledger.test.ts      # Property tests (P1, P2-skipped, P3, P4)
+│   └── api/
+│       ├── balances.get.ts          # GET /api/balances
+│       ├── transactions.get.ts      # GET /api/transactions
+│       ├── transactions.post.ts     # POST /api/transactions
+│       ├── accounts.get.ts          # GET /api/accounts
+│       └── __tests__/
+│           └── api-routes.test.ts   # Unit tests with mocked Nitro globals
+└── .kiro/
+    ├── specs/hledger-budget-app/    # Spec files (requirements, design, tasks)
+    └── steering/                    # This file + git workflow rules
+```
 
 ## Key Design Decisions
 
 1. Delegate all accounting to hledger — no custom balance calculations
 2. Append-only writes to journal files (no in-place edits)
-3. Validate new entries by running them through hledger's parser before saving
+3. All writes go through `hledger add` via stdin — the app NEVER writes to the journal file directly
 4. Use hledger's `--budget` flag for budget vs actuals — no separate budget storage
 5. All API responses are typed TypeScript objects parsed from hledger JSON output
+6. Server utils are plain exported functions (no classes) — Nitro auto-imports from `server/utils/`
+
+## Known Issues & Lessons Learned
+
+### hledger add stdin behavior
+`hledger add` in interactive/stdin mode does NOT reject unbalanced transactions. When given two postings with explicit amounts that don't sum to zero, it silently zeroes them out and exits 0. This means:
+- Property 2 (reject invalid input) is skipped — the spec assumed hledger would reject, but it doesn't
+- Input validation for balanced amounts must happen in the app layer if needed, not rely on hledger add
+
+### TypeScript setup without nuxt prepare
+The `.nuxt/tsconfig.json` doesn't exist until `nuxt prepare` or `nuxt dev` runs. The standalone `tsconfig.json` uses `ES2022` target with `@types/node` so the IDE works without running nuxt prepare first. The vitest config uses `esbuild: { tsconfigRaw: '{}' }` to avoid the same issue during test runs.
+
+### Nitro auto-imports in tests
+API route handlers use Nitro auto-imports (`defineEventHandler`, `getQuery`, `readBody`, `createError`, `setResponseStatus`, `hledgerExec`, `addTransaction`). These show as IDE errors until `nuxt prepare` generates type declarations. Tests mock these globals with `vi.stubGlobal()`.
 
 ## Planned Pages
 
@@ -47,56 +93,49 @@ Browser (Nuxt UI)  →  Nuxt 4 Server (Nitro)  →  hledger CLI  →  .journal f
 
 ## API Surface
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/balances` | Account balances (optional period filter) |
-| GET | `/api/transactions` | List transactions with filters |
-| POST | `/api/transactions` | Add a new transaction |
-| GET | `/api/accounts` | List all account names |
-| GET | `/api/budget` | Budget vs actuals report |
-| GET | `/api/reports/income-statement` | Income statement |
-| GET | `/api/reports/balance-sheet` | Balance sheet |
+| Method | Path | Purpose | Status |
+|--------|------|---------|--------|
+| GET | `/api/balances` | Account balances (optional period, account, depth filters) | Done |
+| GET | `/api/transactions` | List transactions (optional startDate, endDate, account filters) | Done |
+| POST | `/api/transactions` | Add a new transaction (validates required fields + 2+ postings) | Done |
+| GET | `/api/accounts` | List all account names | Done |
+| GET | `/api/budget` | Budget vs actuals report | Planned |
+| GET | `/api/reports/income-statement` | Income statement | Planned |
+| GET | `/api/reports/balance-sheet` | Balance sheet | Planned |
 
-## Core Server Components
+## Core Server Utils — `server/utils/hledger.ts`
 
-- **HledgerService** — Executes hledger commands, parses JSON output into typed objects
-- **JournalManager** — Resolves journal path, appends entries, validates via hledger, creates backups
+Three plain functions, auto-imported by Nitro:
+
+- `resolveJournalPath()` — returns `LEDGER_FILE` env var or `/data/main.journal`
+- `hledgerExec(args)` — spawns hledger with args + `-f <path> -O json`, parses JSON stdout, throws on non-zero exit
+- `addTransaction(input)` — pipes stdin to `hledger add`: date, description, account/amount pairs, `.` (end), `y` (confirm), `.` (quit). Commodity defaults to `$`.
 
 ## Deployment — Docker Compose
 
-The app is designed from the start to run via `docker compose up`.
-
-- Single container: Node image with hledger installed
-- Journal data lives on a Docker volume (or bind mount) at `/data/`
-- `LEDGER_FILE` env var defaults to `/data/main.journal`
-- Nuxt runs in production mode (`node .output/server/index.mjs`)
-- Port 3000 exposed by default
-
-```
-docker-compose.yml
-Dockerfile
-```
-
-Key points:
-- The Dockerfile installs hledger (via apt or static binary) alongside the Node runtime
-- Multi-stage build: build Nuxt in one stage, run in a slim production stage
-- Journal files persist across container restarts via the volume
-- Users distribute the app by sharing the compose file + optionally a seed journal
+- Single container: Node 20 Alpine with hledger installed via `apk`
+- Multi-stage build: build Nuxt in stage 1, copy `.output/` to slim runtime stage
+- Journal data on named volume `journal-data` at `/data/`
+- `LEDGER_FILE=/data/main.journal`, `HOST=0.0.0.0`, `PORT=3000`
+- Run with `docker compose up`
 
 ## Documentation References
 
 When building this app, use these resources for accurate, up-to-date information:
 
-- **Nuxt 4 / Nuxt framework**: Use the `mcp_nuxt_docs_*` MCP tools (get_documentation_page, list_documentation_pages, etc.) for Nuxt framework docs, modules, deployment guides, and blog posts.
-- **Nuxt UI**: Use the `mcp_nuxt_ui_*` MCP tools (get_component, get_component_metadata, list_components, etc.) for component APIs, props, slots, events, theming, and examples.
-- **hledger**: No docs MCP available. Use web search and fetch from https://hledger.org as needed for CLI flags, journal format, JSON output structure, and budget directives.
+- **Nuxt 4 / Nuxt framework**: Use the `mcp_nuxt_docs_*` MCP tools (get_documentation_page, list_documentation_pages, etc.)
+- **Nuxt UI**: Use the `mcp_nuxt_ui_*` MCP tools (get_component, get_component_metadata, list_components, etc.)
+- **hledger**: No docs MCP available. Use web search and fetch from https://hledger.org as needed
 
-Always prefer MCP tools over web search when available — they return structured, current data.
+Always prefer MCP tools over web search when available.
 
 ## Conventions
 
 - Nuxt UI components for all UI (UTable, UCard, UForm, UModal, UProgress, etc.)
 - Composables for data fetching (`useBalances`, `useTransactions`, `useBudget`, `useAccounts`)
 - Server routes in `server/api/`
-- Shared types in a `types/` directory
+- Shared types in `types/` directory
 - hledger service logic in `server/utils/`
+- Tests alongside source in `__tests__/` directories
+- Property-based tests with fast-check, unit tests with vitest
+- Mock Nitro globals with `vi.stubGlobal()` for API route tests

@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - journal-data:/data
+    environment:
+      - LEDGER_FILE=/data/main.journal
+
+volumes:
+  journal-data:

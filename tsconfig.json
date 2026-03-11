@@ -1,21 +1,3 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "types": ["node"],
-    "lib": ["ES2022", "DOM"]
-  },
-  "include": [
-    "**/*.ts",
-    "**/*.vue"
-  ],
-  "exclude": [
-    "node_modules",
-    ".nuxt",
-    ".output"
-  ]
+  "extends": "./.nuxt/tsconfig.json"
 }

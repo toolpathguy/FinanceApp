@@ -6,7 +6,7 @@ services:
     volumes:
       - journal-data:/data
     environment:
-      - LEDGER_FILE=/data/main.journal
+      - LEDGER_FILE=test-data/sample.journal
 
 volumes:
   journal-data:

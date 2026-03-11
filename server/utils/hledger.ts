@@ -3,7 +3,7 @@ import type { TransactionInput } from '../../types/api'
 
 /** Resolve journal path from env, with Docker default fallback */
 export function resolveJournalPath(): string {
-  return process.env.LEDGER_FILE || '/data/main.journal'
+  return process.env.LEDGER_FILE || 'test-data/sample.journal'
 }
 
 /** Run an hledger command and return parsed JSON */
@@ -19,6 +19,55 @@ export async function hledgerExec(args: string[]): Promise<unknown> {
   const code = await new Promise<number>((res) => proc.on('close', res))
   if (code !== 0) throw new Error(`hledger error: ${stderr}`)
   return JSON.parse(stdout)
+}
+
+/** Run an hledger command and return raw text output (for commands that don't support -O json) */
+export async function hledgerExecText(args: string[]): Promise<string> {
+  const file = resolveJournalPath()
+  const fullArgs = [...args, '-f', file]
+  const proc = spawn('hledger', fullArgs)
+
+  let stdout = '', stderr = ''
+  proc.stdout.on('data', (c) => { stdout += c })
+  proc.stderr.on('data', (c) => { stderr += c })
+
+  const code = await new Promise<number>((res) => proc.on('close', res))
+  if (code !== 0) throw new Error(`hledger error: ${stderr}`)
+  return stdout
+}
+
+/** Transform a raw hledger amount object to our HledgerAmount interface */
+function transformAmount(raw: any): { commodity: string; quantity: number } {
+  return {
+    commodity: raw.acommodity ?? '',
+    quantity: raw.aquantity?.floatingPoint ?? raw.aquantity ?? 0,
+  }
+}
+
+/** Transform raw hledger print JSON to our HledgerTransaction[] */
+export function transformTransactions(raw: any[]): any[] {
+  return raw.map((t: any) => ({
+    date: t.tdate ?? '',
+    status: t.tstatus === 'Cleared' ? '*' : t.tstatus === 'Pending' ? '!' : '',
+    description: t.tdescription ?? '',
+    index: t.tindex ?? 0,
+    postings: (t.tpostings ?? []).map((p: any) => ({
+      account: p.paccount ?? '',
+      amounts: (p.pamount ?? []).map(transformAmount),
+    })),
+  }))
+}
+
+/** Transform raw hledger bal JSON to our HledgerBalanceReport */
+export function transformBalanceReport(raw: any): any {
+  const [rawRows, rawTotals] = raw as [any[], any[]]
+  return {
+    rows: (rawRows ?? []).map((row: any) => ({
+      account: row[0] ?? '',
+      amounts: (row[3] ?? []).map(transformAmount),
+    })),
+    totals: (rawTotals ?? []).map(transformAmount),
+  }
 }
 
 /** Add a transaction by piping input to hledger add via stdin */

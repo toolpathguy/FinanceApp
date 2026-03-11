@@ -42,7 +42,7 @@ describe('resolveJournalPath', () => {
   it('Property 3: returns default path when LEDGER_FILE is not set', () => {
     delete process.env.LEDGER_FILE
     const result = resolveJournalPath()
-    expect(result).toBe('/data/main.journal')
+    expect(result).toBe('test-data/sample.journal')
     expect(result.length).toBeGreaterThan(0)
   })
 

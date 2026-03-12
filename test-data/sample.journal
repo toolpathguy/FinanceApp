@@ -1,5 +1,8 @@
-; Sample hledger journal for UI testing
-; Covers: assets, liabilities, income, expenses across multiple months
+; Sample hledger journal for YNAB-style UI testing
+; All transactions follow the simplified model:
+;   Income:  assets:account ← income:category
+;   Expense: expenses:category ← assets:account or liabilities:account
+;   Transfer: assets:account ← assets:account
 
 account assets:checking
 account assets:savings
@@ -13,25 +16,22 @@ account expenses:housing:utilities
 account expenses:transport
 account expenses:entertainment
 
-2025-01-01 * Opening balances
-    assets:checking                    $5,000.00
-    assets:savings                    $10,000.00
-    equity:opening-balances
+; ── January 2025 ──
 
 2025-01-05 * Salary
     assets:checking                    $3,500.00
     income:salary
 
 2025-01-10 * Rent
-    expenses:housing:rent             $1,200.00
+    expenses:housing:rent              $1,200.00
     assets:checking
 
 2025-01-12 * Electric bill
-    expenses:housing:utilities           $95.00
+    expenses:housing:utilities            $95.00
     assets:checking
 
 2025-01-15 * Restaurant dinner
-    expenses:food:restaurants            $45.00
+    expenses:food:restaurants             $45.00
     liabilities:credit-card
 
 2025-01-18 * Freelance payment
@@ -39,31 +39,33 @@ account expenses:entertainment
     income:freelance
 
 2025-01-20 * Gas station
-    expenses:transport                   $55.00
+    expenses:transport                    $55.00
     assets:checking
 
 2025-01-22 * Movie tickets
-    expenses:entertainment               $30.00
+    expenses:entertainment                $30.00
     liabilities:credit-card
 
 2025-01-25 * Transfer to savings
-    assets:savings                      $500.00
+    assets:savings                       $500.00
     assets:checking
+
+; ── February 2025 ──
 
 2025-02-01 * Salary
     assets:checking                    $3,500.00
     income:salary
 
 2025-02-03 * Grocery store
-    expenses:food:groceries              $92.00
+    expenses:food:groceries               $92.00
     assets:checking
 
 2025-02-05 * Credit card payment
-    liabilities:credit-card              $75.00
+    liabilities:credit-card               $75.00
     assets:checking
 
 2025-02-10 * Rent
-    expenses:housing:rent             $1,200.00
+    expenses:housing:rent              $1,200.00
     assets:checking
 
 2025-02-14 * Valentine's dinner
@@ -71,9 +73,86 @@ account expenses:entertainment
     liabilities:credit-card
 
 2025-02-20 * Internet bill
-    expenses:housing:utilities           $65.00
+    expenses:housing:utilities            $65.00
     assets:checking
 
-2026-03-11 Open account TEST1
-    TEST1                             $0.00
-    equity:opening-balances           $0.00
+2025-02-25 * Transfer to savings
+    assets:savings                       $400.00
+    assets:checking
+
+; ── March 2025 ──
+
+2025-03-01 * Salary
+    assets:checking                    $3,500.00
+    income:salary
+
+2025-03-03 * Grocery store
+    expenses:food:groceries              $110.00
+    assets:checking
+
+2025-03-05 * Coffee shop
+    expenses:food:restaurants             $18.00
+    assets:checking
+
+2025-03-08 * Gas station
+    expenses:transport                    $48.00
+    assets:checking
+
+2025-03-10 * Rent
+    expenses:housing:rent              $1,200.00
+    assets:checking
+
+2025-03-12 * Electric bill
+    expenses:housing:utilities           $102.00
+    assets:checking
+
+2025-03-15 * Freelance payment
+    assets:checking                      $750.00
+    income:freelance
+
+2025-03-16 * Movie night
+    expenses:entertainment                $35.00
+    liabilities:credit-card
+
+2025-03-18 * Grocery store
+    expenses:food:groceries               $87.00
+    assets:checking
+
+2025-03-20 * Credit card payment
+    liabilities:credit-card              $155.00
+    assets:checking
+
+2025-03-22 * Dinner out
+    expenses:food:restaurants             $65.00
+    liabilities:credit-card
+
+2025-03-25 * Transfer to savings
+    assets:savings                       $600.00
+    assets:checking
+
+; ── Ongoing into current period ──
+
+2026-03-01 * Salary
+    assets:checking                    $3,500.00
+    income:salary
+
+2026-03-03 * Grocery store
+    expenses:food:groceries              $105.00
+    assets:checking
+
+2026-03-05 * Coffee shop
+    expenses:food:restaurants             $22.00
+    assets:checking
+
+2026-03-08 * Gas station
+    expenses:transport                    $52.00
+    assets:checking
+
+2026-03-10 * Rent
+    expenses:housing:rent              $1,200.00
+    assets:checking
+
+2026-03-11 * Electric bill
+    expenses:housing:utilities            $98.00
+    assets:checking
+

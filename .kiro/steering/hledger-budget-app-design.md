@@ -100,6 +100,96 @@ Browser (Nuxt UI)  →  Nuxt 4 Server (Nitro)  →  hledger CLI  →  .journal f
 9. Leaf nodes in account tree have `children: undefined` (not empty array) so UTree treats them as selectable items
 10. Amount display uses red (text-red-500) for negative and green (text-green-500) for positive values
 
+## YNAB-Style Simplified Transaction Model
+
+The app hides double-entry accounting from the user entirely. The UX follows YNAB's proven model where users think in terms of accounts, payees, categories, and inflow/outflow — never postings or debits/credits.
+
+### Core Concepts
+
+- **Account**: A real-world financial account (checking, savings, credit card). Maps to hledger `assets:*` or `liabilities:*` accounts.
+- **Payee**: Who you paid or received money from (e.g., "Grocery Store", "Employer"). Stored in the hledger transaction description.
+- **Category**: A budget envelope (e.g., "Groceries", "Rent", "Entertainment"). Maps to hledger `expenses:*` or `income:*` accounts.
+- **Inflow**: Money entering an account (positive amount). Used for income, refunds, transfers in.
+- **Outflow**: Money leaving an account (positive amount entered by user, stored as negative in hledger). Used for spending, bill payments, transfers out.
+
+### Transaction Types & hledger Mapping
+
+**Expense** (outflow from account to category):
+- User enters: Account=Checking, Payee="Coffee Shop", Category=Dining, Outflow=$5.00
+- hledger posting 1: `expenses:dining  $5.00`
+- hledger posting 2: `assets:checking  -$5.00`
+
+**Income** (inflow to account, category = "Ready to Assign"):
+- User enters: Account=Checking, Payee="Employer", Category=Ready to Assign, Inflow=$2000
+- hledger posting 1: `assets:checking  $2000.00`
+- hledger posting 2: `income:salary  -$2000.00`
+
+**Transfer** (money moves between two accounts, no category):
+- User enters: Account=Checking, Payee="Transfer: Savings", Amount=$500
+- hledger posting 1: `assets:savings  $500.00`
+- hledger posting 2: `assets:checking  -$500.00`
+- Transfers have no category — money stays in the budget, just moves between accounts.
+
+### Simplified Transaction Form
+
+The "Add Transaction" modal replaces the raw postings form with:
+
+| Field | Description |
+|-------|-------------|
+| Date | Transaction date (YYYY-MM-DD) |
+| Account | Which account this transaction belongs to (dropdown of user's accounts) |
+| Payee | Free text — who you paid or received from |
+| Category | Budget category (dropdown). "Ready to Assign" for income. Hidden for transfers. |
+| Inflow | Amount entering the account (mutually exclusive with Outflow) |
+| Outflow | Amount leaving the account (mutually exclusive with Inflow) |
+
+The app generates the correct 2-posting hledger transaction from these fields. The user never sees or manages postings directly.
+
+### Account Register Display
+
+When viewing an account's transaction list, each row shows:
+
+| Date | Payee | Category | Inflow | Outflow | Running Balance |
+|------|-------|----------|--------|---------|-----------------|
+
+- **Payee** comes from the transaction description
+- **Category** is derived from the "other" posting's account name (the one that isn't the current account), with the top-level prefix stripped (e.g., `expenses:groceries` → "Groceries")
+- **Inflow/Outflow** is determined by the sign of the amount on the current account's posting: positive = inflow, negative = outflow (displayed as absolute value)
+- **Running Balance** is a cumulative running total for the account
+- Transfers show the other account name as the payee (e.g., "Transfer: Savings") and have no category
+
+### Account List / Sidebar
+
+- The sidebar and accounts page only show "real" accounts (assets + liabilities), not expense/income categories
+- Categories (expenses/income accounts) are managed separately in the budget page
+- Account balances shown in the sidebar are the net balance from hledger
+
+### Budget Page (Envelope Model)
+
+The budget page follows YNAB's envelope approach:
+
+- **Ready to Assign**: Total unbudgeted money (income received minus total assigned to categories)
+- **Category Groups**: Groupings of budget categories (e.g., "Bills", "Everyday", "Savings Goals")
+- **Each Category Row**: Shows Assigned (budgeted) | Activity (spent this period) | Available (remaining in envelope)
+- Categories map to hledger expense accounts
+- "Assigning" money to a category is a virtual allocation — tracked via hledger budget directives or a separate budget config
+- Activity is pulled from actual transactions categorized to that expense account
+
+### Category Management
+
+- Categories are the expense/income accounts in hledger (e.g., `expenses:groceries`, `expenses:rent`)
+- Users create/rename/delete categories from the budget page, not the accounts page
+- The accounts page is strictly for real financial accounts (bank accounts, credit cards)
+- This separation mirrors YNAB: accounts ≠ categories
+
+### Display Conventions
+
+- Inflows displayed in green (text-green-500)
+- Outflows displayed in red (text-red-500)
+- Transfers displayed in neutral color
+- All amounts shown as positive numbers — direction indicated by column (Inflow vs Outflow)
+- Account names in the UI strip the hledger prefix (e.g., `assets:checking` → "Checking", `liabilities:credit-card` → "Credit Card")
+
 ## hledger JSON Transform Layer
 
 hledger's JSON output uses different field names than our TypeScript interfaces:

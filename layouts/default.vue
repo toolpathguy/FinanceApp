@@ -4,16 +4,36 @@ import type { AccountTreeItem } from '~/types/ui'
 
 const open = ref(false)
 
-const { data: accounts } = useAccounts()
-
-const accountTree = computed(() => {
-  return buildAccountTree(accounts.value ?? [])
+const route = useRoute()
+const selectedAccount = computed({
+  get: () => {
+    const path = route.path
+    if (!path.startsWith('/accounts/')) return undefined
+    // Decode the account path from the URL to match tree item fullName
+    const encoded = path.replace('/accounts/', '')
+    return { fullName: decodeURIComponent(encoded) } as AccountTreeItem
+  },
+  set: () => {},
 })
 
+const { data: accounts } = useAccounts('real')
+
+const accountTree = computed(() => {
+  const tree = buildAccountTree(accounts.value ?? [])
+  return titleCaseTree(tree)
+})
+
+/** Title-case labels in the account tree for clean display (Requirement 7.4) */
+function titleCaseTree(items: AccountTreeItem[]): AccountTreeItem[] {
+  return items.map(item => ({
+    ...item,
+    label: stripAccountPrefix(item.label),
+    children: item.children ? titleCaseTree(item.children) : undefined,
+  }))
+}
+
 const links: NavigationMenuItem[][] = [[
-  { label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/' },
   { label: 'Budget', icon: 'i-lucide-target', to: '/budget' },
-  { label: 'Reports', icon: 'i-lucide-bar-chart-3', to: '/reports' },
 ]]
 
 const settingsLinks: NavigationMenuItem[][] = [[
@@ -69,6 +89,7 @@ function onAccountSelect(_e: any, item: AccountTreeItem) {
         </div>
 
         <UTree
+          v-model="selectedAccount"
           :items="accountTree"
           :get-key="(item: AccountTreeItem) => item.fullName"
           color="neutral"

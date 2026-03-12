@@ -1,15 +1,10 @@
-import type { BudgetReport } from '~/types/ui'
+import type { BudgetEnvelopeReport } from '~/types/ui'
 
 export function useBudget(period?: MaybeRefOrGetter<string>) {
-  const params = computed(() => {
-    const p: Record<string, string> = {}
-    const val = period ? toValue(period) : undefined
-    if (val) p.period = val
-    return p
+  const query = computed(() => {
+    const p = period ? toValue(period) : ''
+    return p ? { period: p } : {}
   })
 
-  return useFetch<BudgetReport>('/api/budget', {
-    query: params,
-    watch: [params],
-  })
+  return useFetch<BudgetEnvelopeReport>('/api/budget', { query, watch: [query] })
 }

@@ -60,7 +60,7 @@ describe('POST /api/transactions', () => {
     })
   })
 
-  it('returns 400 when description is missing', async () => {
+  it('returns 400 when legacy body has no description and no postings array', async () => {
     mockReadBody.mockResolvedValue({
       date: '2025-01-15',
       postings: [
@@ -69,21 +69,23 @@ describe('POST /api/transactions', () => {
       ],
     })
 
+    // No description + no payee/type → unrecognized format
     await expect(postTransactions(fakeEvent)).rejects.toMatchObject({
       statusCode: 400,
-      message: 'Missing required fields',
+      message: 'Unrecognized transaction format',
     })
   })
 
-  it('returns 400 when postings is missing', async () => {
+  it('returns 400 when legacy body has description but no postings', async () => {
     mockReadBody.mockResolvedValue({
       date: '2025-01-15',
       description: 'Groceries',
     })
 
+    // description present but postings not an array → unrecognized format
     await expect(postTransactions(fakeEvent)).rejects.toMatchObject({
       statusCode: 400,
-      message: 'Missing required fields',
+      message: 'Unrecognized transaction format',
     })
   })
 
@@ -113,7 +115,7 @@ describe('POST /api/transactions', () => {
     })
   })
 
-  it('calls addTransaction and returns 201 for valid input', async () => {
+  it('calls addTransaction and returns 201 for valid legacy input', async () => {
     const validBody = {
       date: '2025-01-15',
       description: 'Groceries',
@@ -130,6 +132,82 @@ describe('POST /api/transactions', () => {
     expect(mockAddTransaction).toHaveBeenCalledWith(validBody)
     expect(mockSetResponseStatus).toHaveBeenCalledWith(fakeEvent, 201)
     expect(result).toEqual({ success: true })
+  })
+
+  it('converts SimplifiedTransactionInput and returns 201 for valid expense', async () => {
+    const simplifiedBody = {
+      date: '2025-01-15',
+      payee: 'Coffee Shop',
+      account: 'assets:checking',
+      type: 'expense',
+      category: 'expenses:dining',
+      amount: 5,
+    }
+    mockReadBody.mockResolvedValue(simplifiedBody)
+    mockAddTransaction.mockResolvedValue(undefined)
+
+    const result = await postTransactions(fakeEvent)
+
+    expect(mockAddTransaction).toHaveBeenCalledWith({
+      date: '2025-01-15',
+      description: 'Coffee Shop',
+      postings: [
+        { account: 'expenses:dining', amount: 5, commodity: '$' },
+        { account: 'assets:checking', amount: -5, commodity: '$' },
+      ],
+      status: '*',
+    })
+    expect(mockSetResponseStatus).toHaveBeenCalledWith(fakeEvent, 201)
+    expect(result).toEqual({ success: true })
+  })
+
+  it('converts SimplifiedTransactionInput and returns 201 for valid transfer', async () => {
+    const simplifiedBody = {
+      date: '2025-02-01',
+      payee: 'Transfer',
+      account: 'assets:checking',
+      type: 'transfer',
+      transferAccount: 'assets:savings',
+      amount: 500,
+    }
+    mockReadBody.mockResolvedValue(simplifiedBody)
+    mockAddTransaction.mockResolvedValue(undefined)
+
+    const result = await postTransactions(fakeEvent)
+
+    expect(mockAddTransaction).toHaveBeenCalledWith({
+      date: '2025-02-01',
+      description: 'Transfer',
+      postings: [
+        { account: 'assets:savings', amount: 500, commodity: '$' },
+        { account: 'assets:checking', amount: -500, commodity: '$' },
+      ],
+      status: '*',
+    })
+    expect(mockSetResponseStatus).toHaveBeenCalledWith(fakeEvent, 201)
+    expect(result).toEqual({ success: true })
+  })
+
+  it('returns 400 for simplified input missing required fields', async () => {
+    mockReadBody.mockResolvedValue({
+      payee: 'Coffee Shop',
+      type: 'expense',
+      // missing date, account, amount
+    })
+
+    await expect(postTransactions(fakeEvent)).rejects.toMatchObject({
+      statusCode: 400,
+      message: 'Missing required fields',
+    })
+  })
+
+  it('returns 400 for unrecognized body format', async () => {
+    mockReadBody.mockResolvedValue({ foo: 'bar' })
+
+    await expect(postTransactions(fakeEvent)).rejects.toMatchObject({
+      statusCode: 400,
+      message: 'Unrecognized transaction format',
+    })
   })
 })
 
@@ -238,15 +316,51 @@ describe('GET /api/transactions', () => {
 
 /**
  * GET /api/accounts
- * Validates: Requirement 7.1
+ * Validates: Requirements 6.1, 6.2, 6.5
  */
 describe('GET /api/accounts', () => {
-  it('calls hledger with accounts command and parses text output', async () => {
-    mockHledgerExecText.mockResolvedValue('expenses:food\nassets:checking\n')
+  const accountsOutput = 'assets:checking\nassets:savings\nexpenses:food\nexpenses:dining\nincome:salary\nliabilities:credit-card\n'
+
+  it('returns all accounts when no type param is provided', async () => {
+    mockGetQuery.mockReturnValue({})
+    mockHledgerExecText.mockResolvedValue(accountsOutput)
 
     const result = await getAccounts(fakeEvent)
 
     expect(mockHledgerExecText).toHaveBeenCalledWith(['accounts'])
-    expect(result).toEqual(['expenses:food', 'assets:checking'])
+    expect(result).toEqual([
+      'assets:checking', 'assets:savings', 'expenses:food',
+      'expenses:dining', 'income:salary', 'liabilities:credit-card',
+    ])
+  })
+
+  it('returns all accounts when type=all', async () => {
+    mockGetQuery.mockReturnValue({ type: 'all' })
+    mockHledgerExecText.mockResolvedValue(accountsOutput)
+
+    const result = await getAccounts(fakeEvent)
+
+    expect(result).toEqual([
+      'assets:checking', 'assets:savings', 'expenses:food',
+      'expenses:dining', 'income:salary', 'liabilities:credit-card',
+    ])
+  })
+
+  it('returns only real accounts when type=real', async () => {
+    mockGetQuery.mockReturnValue({ type: 'real' })
+    mockHledgerExecText.mockResolvedValue(accountsOutput)
+
+    const result = await getAccounts(fakeEvent)
+
+    expect(result).toEqual(['assets:checking', 'assets:savings', 'liabilities:credit-card'])
+  })
+
+  it('returns only category accounts when type=category', async () => {
+    mockGetQuery.mockReturnValue({ type: 'category' })
+    mockHledgerExecText.mockResolvedValue(accountsOutput)
+
+    const result = await getAccounts(fakeEvent)
+
+    expect(result).toEqual(['expenses:food', 'expenses:dining', 'income:salary'])
   })
 })

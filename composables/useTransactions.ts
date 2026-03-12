@@ -1,5 +1,6 @@
 import type { TransactionQuery } from '~/types/api'
 import type { HledgerTransaction } from '~/types/hledger'
+import type { RegisterRow } from '~/types/ui'
 
 export function useTransactions(query?: MaybeRefOrGetter<TransactionQuery>) {
   const params = computed(() => {
@@ -12,6 +13,18 @@ export function useTransactions(query?: MaybeRefOrGetter<TransactionQuery>) {
   })
 
   return useFetch<HledgerTransaction[]>('/api/transactions', {
+    query: params,
+    watch: [params],
+  })
+}
+
+export function useRegister(query: MaybeRefOrGetter<{ account: string }>) {
+  const params = computed(() => {
+    const q = toValue(query)
+    return { account: q.account }
+  })
+
+  return useFetch<RegisterRow[]>('/api/transactions', {
     query: params,
     watch: [params],
   })

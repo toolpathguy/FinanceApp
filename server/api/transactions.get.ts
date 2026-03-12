@@ -4,5 +4,6 @@ export default defineEventHandler(async (event) => {
   if (startDate) args.push('-b', String(startDate))
   if (endDate) args.push('-e', String(endDate))
   if (account) args.push(String(account))
-  return await hledgerExec(args)
+  const raw = await hledgerExec(args)
+  return transformTransactions(raw as any[])
 })

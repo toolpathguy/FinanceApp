@@ -20,6 +20,14 @@ vi.stubGlobal('setResponseStatus', mockSetResponseStatus)
 vi.stubGlobal('hledgerExec', mockHledgerExec)
 vi.stubGlobal('addTransaction', mockAddTransaction)
 
+const mockHledgerExecText = vi.fn()
+vi.stubGlobal('hledgerExecText', mockHledgerExecText)
+
+const mockTransformTransactions = vi.fn((raw: any[]) => raw)
+const mockTransformBalanceReport = vi.fn((raw: any) => raw)
+vi.stubGlobal('transformTransactions', mockTransformTransactions)
+vi.stubGlobal('transformBalanceReport', mockTransformBalanceReport)
+
 // Import handlers after globals are stubbed
 const { default: postTransactions } = await import('../transactions.post')
 const { default: getBalances } = await import('../balances.get')
@@ -233,12 +241,12 @@ describe('GET /api/transactions', () => {
  * Validates: Requirement 7.1
  */
 describe('GET /api/accounts', () => {
-  it('calls hledger with accounts command', async () => {
-    mockHledgerExec.mockResolvedValue(['expenses:food', 'assets:checking'])
+  it('calls hledger with accounts command and parses text output', async () => {
+    mockHledgerExecText.mockResolvedValue('expenses:food\nassets:checking\n')
 
-    const result = await getAccounts()
+    const result = await getAccounts(fakeEvent)
 
-    expect(mockHledgerExec).toHaveBeenCalledWith(['accounts'])
+    expect(mockHledgerExecText).toHaveBeenCalledWith(['accounts'])
     expect(result).toEqual(['expenses:food', 'assets:checking'])
   })
 })

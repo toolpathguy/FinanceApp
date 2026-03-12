@@ -1,3 +1,4 @@
 export default defineEventHandler(async () => {
-  return await hledgerExec(['accounts'])
+  const output = await hledgerExecText(['accounts'])
+  return output.trim().split(/\r?\n/).filter(Boolean).map(s => s.trim())
 })

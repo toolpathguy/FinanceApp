@@ -39,51 +39,70 @@ Browser (Nuxt UI)  →  Nuxt 4 Server (Nitro)  →  hledger CLI  →  .journal f
 ├── tsconfig.json                    # Extends .nuxt/tsconfig.json
 ├── vitest.config.ts                 # Vitest with esbuild tsconfigRaw workaround
 ├── assets/css/main.css              # Tailwind theme, @nuxt/ui import, Public Sans font, green palette
+├── components/
+│   ├── AccountRegister.vue          # YNAB-style register table (Date, Payee, Envelope, Inflow, Outflow, Balance)
+│   └── SimplifiedTransactionForm.vue # YNAB-style transaction form modal (Account, Payee, Envelope, Inflow/Outflow)
 ├── layouts/
-│   └── default.vue                  # UDashboardGroup + UDashboardSidebar + account tree + nav
+│   └── default.vue                  # UDashboardGroup + UDashboardSidebar + real accounts tree + nav
 ├── pages/
-│   ├── index.vue                    # Dashboard placeholder
-│   ├── budget.vue                   # Budget placeholder
-│   ├── reports.vue                  # Reports placeholder
+│   ├── index.vue                    # Dashboard placeholder (hidden from nav)
+│   ├── budget.vue                   # Envelope budget page (Ready to Assign, grouped envelopes, Assigned/Activity/Available)
+│   ├── reports.vue                  # Reports placeholder (hidden from nav)
 │   ├── settings.vue                 # Journal management (create, upload, export, activate)
 │   └── accounts/
 │       ├── index.vue                # Account management (add/delete accounts)
-│       └── [...path].vue            # Account detail (transactions table, balance, add/edit/delete)
+│       └── [...path].vue            # Account detail (AccountRegister + SimplifiedTransactionForm)
 ├── composables/
-│   ├── useAccounts.ts               # GET /api/accounts
+│   ├── useAccounts.ts               # GET /api/accounts with optional type filter (real/category/all)
 │   ├── useBalances.ts               # GET /api/balances with reactive query
-│   ├── useTransactions.ts           # GET /api/transactions with reactive query
-│   ├── useBudget.ts                 # GET /api/budget (placeholder)
+│   ├── useTransactions.ts           # GET /api/transactions (HledgerTransaction[]) + useRegister (RegisterRow[])
+│   ├── useBudget.ts                 # GET /api/budget with optional period filter (BudgetEnvelopeReport)
 │   └── useReports.ts               # Income statement + balance sheet (placeholder)
 ├── utils/
 │   ├── buildAccountTree.ts          # Flat account paths → hierarchical tree for UTree
 │   ├── formatAmount.ts              # { commodity, quantity } → "$1,234.56" or "-$42.00"
-│   ├── validateTransactionForm.ts   # Form validation returning error messages
+│   ├── stripAccountPrefix.ts        # "expenses:groceries" → "Groceries" (strip first segment, title-case)
+│   ├── filterAccounts.ts            # filterRealAccounts() + filterCategoryAccounts()
+│   ├── deriveTransactionType.ts     # Form state → 'expense' | 'income' | 'transfer'
+│   ├── validateSimplifiedForm.ts    # SimplifiedFormState validation → error messages
+│   ├── toTransactionInput.ts        # SimplifiedTransactionInput → TransactionInput (2 balanced postings)
+│   ├── toRegisterRows.ts           # HledgerTransaction[] → RegisterRow[] (inflow/outflow/running balance)
+│   ├── validateTransactionForm.ts   # Legacy form validation (kept for backward compat)
 │   └── *.test.ts / *.property.test.ts
 ├── types/
 │   ├── hledger.ts                   # HledgerAmount, HledgerPosting, HledgerTransaction, etc.
 │   ├── api.ts                       # TransactionInput, BalanceQuery, TransactionQuery
-│   └── ui.ts                        # AccountTreeItem, TransactionFormState, BudgetRow, etc.
+│   └── ui.ts                        # SimplifiedTransactionInput, SimplifiedFormState, RegisterRow,
+│                                    # BudgetCategory, BudgetCategoryGroup, BudgetEnvelopeReport,
+│                                    # RealAccount, AccountTreeItem, TransactionFormState (legacy)
 ├── server/
 │   ├── utils/
 │   │   └── hledger.ts               # resolveJournalPath, hledgerExec, hledgerExecText,
 │   │                                # transformTransactions, transformBalanceReport, addTransaction
 │   └── api/
-│       ├── accounts.get.ts          # GET /api/accounts (text mode, CRLF-safe)
+│       ├── accounts.get.ts          # GET /api/accounts?type=real|category|all
 │       ├── balances.get.ts          # GET /api/balances (with transform)
-│       ├── transactions.get.ts      # GET /api/transactions (with transform)
-│       ├── transactions.post.ts     # POST /api/transactions
+│       ├── transactions.get.ts      # GET /api/transactions (RegisterRow[] when account filter, else HledgerTransaction[])
+│       ├── transactions.post.ts     # POST /api/transactions (accepts SimplifiedTransactionInput or legacy TransactionInput)
 │       ├── transactions.delete.ts   # DELETE /api/transactions?index=N (direct journal edit)
+│       ├── budget.get.ts            # GET /api/budget?period= (BudgetEnvelopeReport with persistent categories)
+│       ├── categories.post.ts       # POST /api/categories (create expense account groups/envelopes)
+│       ├── hidden-envelopes.get.ts  # GET /api/hidden-envelopes (list hidden envelope paths)
+│       ├── hidden-envelopes.post.ts # POST /api/hidden-envelopes (hide/unhide envelopes)
 │       └── journal/
 │           ├── create.post.ts       # POST /api/journal/create
 │           ├── upload.post.ts       # POST /api/journal/upload
 │           ├── export.get.ts        # GET /api/journal/export
 │           ├── activate.post.ts     # POST /api/journal/activate
 │           └── list.get.ts          # GET /api/journal/list
+├── config/
+│   └── hidden-envelopes.json        # User-specific hidden envelope list (gitignored)
 ├── test-data/
-│   └── sample.journal               # Realistic multi-month test data
+│   └── sample.journal               # Multi-month test data (Jan 2025 – Mar 2026)
 └── .kiro/
-    ├── specs/hledger-budget-app-ui/ # Spec files (requirements, design, tasks)
+    ├── specs/
+    │   ├── ynab-style-accounts-ux/  # Completed spec (requirements, design, tasks)
+    │   └── envelope-budget-assignments/ # Next spec (design doc ready)
     └── steering/                    # This file + git workflow rules
 ```
 
@@ -209,32 +228,39 @@ Balance report JSON is a tuple `[[rows...], [totals...]]` where each row is `[fu
 ## Sidebar & Navigation
 
 - UDashboardGroup with UDashboardSidebar (collapsible, resizable)
-- Top: Dashboard, Budget, Reports links via UNavigationMenu
-- Middle: "Accounts" label with gear icon linking to /accounts management page, UTree with account hierarchy
+- Top: Budget link via UNavigationMenu (Dashboard and Reports hidden for now)
+- Middle: "Accounts" label with gear icon linking to /accounts management page, UTree with real accounts only (assets + liabilities)
 - Bottom: Settings link
 - Account tree click navigates to `/accounts/{encodeURIComponent(fullName)}`
 - Account tree built from flat account paths via `buildAccountTree` utility
+- Account names displayed via `stripAccountPrefix()` (e.g., "Checking" instead of "assets:checking")
+- Tree selection is route-driven — deselects when navigating away from account pages
+- Terminology: "Category" is called "Envelope" in the UI
 
 ## Pages
 
 | Route | Purpose | Status |
 |-------|---------|--------|
-| `/` | Dashboard placeholder | Done (placeholder) |
-| `/budget` | Budget placeholder | Done (placeholder) |
-| `/reports` | Reports placeholder | Done (placeholder) |
+| `/` | Dashboard placeholder | Done (hidden from nav) |
+| `/budget` | Envelope budget page (Ready to Assign, grouped envelopes, Assigned/Activity/Available, add group/envelope, hide envelopes) | Done |
+| `/reports` | Reports placeholder | Done (hidden from nav) |
 | `/settings` | Journal management (create, upload, export, list, activate) | Done |
 | `/accounts` | Account management (add/delete accounts) | Done |
-| `/accounts/:path` | Account detail (transactions, balance, add/edit/delete) | Done |
+| `/accounts/:path` | Account detail (AccountRegister + SimplifiedTransactionForm, balance badge, delete) | Done |
 
 ## API Surface
 
 | Method | Path | Purpose | Status |
 |--------|------|---------|--------|
-| GET | `/api/accounts` | List all account names (text mode) | Done |
+| GET | `/api/accounts?type=` | List account names with optional type filter (real/category/all) | Done |
 | GET | `/api/balances` | Account balances with transforms | Done |
-| GET | `/api/transactions` | List transactions with transforms | Done |
-| POST | `/api/transactions` | Add a new transaction via hledger add | Done |
+| GET | `/api/transactions` | RegisterRow[] when account filter present, else HledgerTransaction[] | Done |
+| POST | `/api/transactions` | Add transaction (accepts SimplifiedTransactionInput or legacy TransactionInput) | Done |
 | DELETE | `/api/transactions?index=N` | Delete transaction by journal index | Done |
+| GET | `/api/budget?period=` | BudgetEnvelopeReport with persistent categories and period-filtered activity | Done |
+| POST | `/api/categories` | Create expense account groups/envelopes | Done |
+| GET | `/api/hidden-envelopes` | List hidden envelope account paths | Done |
+| POST | `/api/hidden-envelopes` | Hide/unhide envelopes | Done |
 | POST | `/api/journal/create` | Create new empty journal file | Done |
 | POST | `/api/journal/upload` | Upload journal file content | Done |
 | GET | `/api/journal/export` | Export current journal as text | Done |

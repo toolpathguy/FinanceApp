@@ -39,6 +39,32 @@ describe('filterRealAccounts', () => {
   it('does not match partial prefixes', () => {
     expect(filterRealAccounts(['assetsmisc', 'liabilitiesother'])).toEqual([])
   })
+
+  it('excludes budget sub-accounts under assets', () => {
+    const accounts = [
+      'assets:checking',
+      'assets:checking:budget:groceries',
+      'assets:checking:budget:rent',
+      'assets:checking:budget:unallocated',
+      'assets:savings',
+      'liabilities:credit-card',
+    ]
+    expect(filterRealAccounts(accounts)).toEqual([
+      'assets:checking',
+      'assets:savings',
+      'liabilities:credit-card',
+    ])
+  })
+
+  it('excludes nested budget sub-accounts', () => {
+    const accounts = [
+      'assets:checking',
+      'assets:checking:budget:food:groceries',
+      'assets:checking:budget:food:restaurants',
+      'assets:checking:budget:housing:rent',
+    ]
+    expect(filterRealAccounts(accounts)).toEqual(['assets:checking'])
+  })
 })
 
 describe('filterCategoryAccounts', () => {

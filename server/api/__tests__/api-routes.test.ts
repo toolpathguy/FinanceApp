@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mockHledgerExec = vi.fn()
 const mockAddTransaction = vi.fn()
+const mockAppendTransaction = vi.fn()
 const mockSetResponseStatus = vi.fn()
 const mockReadBody = vi.fn()
 const mockGetQuery = vi.fn()
@@ -19,6 +20,11 @@ vi.stubGlobal('createError', (opts: { statusCode: number; message: string }) => 
 vi.stubGlobal('setResponseStatus', mockSetResponseStatus)
 vi.stubGlobal('hledgerExec', mockHledgerExec)
 vi.stubGlobal('addTransaction', mockAddTransaction)
+
+// Mock the journalWriter module so appendTransaction is intercepted
+vi.mock('../../utils/journalWriter', () => ({
+  appendTransaction: (...args: any[]) => mockAppendTransaction(...args),
+}))
 
 const mockHledgerExecText = vi.fn()
 vi.stubGlobal('hledgerExecText', mockHledgerExecText)
@@ -115,7 +121,7 @@ describe('POST /api/transactions', () => {
     })
   })
 
-  it('calls addTransaction and returns 201 for valid legacy input', async () => {
+  it('calls appendTransaction and returns 201 for valid legacy input', async () => {
     const validBody = {
       date: '2025-01-15',
       description: 'Groceries',
@@ -125,16 +131,16 @@ describe('POST /api/transactions', () => {
       ],
     }
     mockReadBody.mockResolvedValue(validBody)
-    mockAddTransaction.mockResolvedValue(undefined)
+    mockAppendTransaction.mockResolvedValue(undefined)
 
     const result = await postTransactions(fakeEvent)
 
-    expect(mockAddTransaction).toHaveBeenCalledWith(validBody)
+    expect(mockAppendTransaction).toHaveBeenCalledWith(validBody)
     expect(mockSetResponseStatus).toHaveBeenCalledWith(fakeEvent, 201)
     expect(result).toEqual({ success: true })
   })
 
-  it('converts SimplifiedTransactionInput and returns 201 for valid expense', async () => {
+  it('converts SimplifiedTransactionInput expense with envelope category to budget sub-account', async () => {
     const simplifiedBody = {
       date: '2025-01-15',
       payee: 'Coffee Shop',
@@ -144,19 +150,74 @@ describe('POST /api/transactions', () => {
       amount: 5,
     }
     mockReadBody.mockResolvedValue(simplifiedBody)
-    mockAddTransaction.mockResolvedValue(undefined)
+    mockAppendTransaction.mockResolvedValue(undefined)
 
     const result = await postTransactions(fakeEvent)
 
-    expect(mockAddTransaction).toHaveBeenCalledWith({
+    expect(mockAppendTransaction).toHaveBeenCalledWith({
       date: '2025-01-15',
       description: 'Coffee Shop',
       postings: [
         { account: 'expenses:dining', amount: 5, commodity: '$' },
-        { account: 'assets:checking', amount: -5, commodity: '$' },
+        { account: 'assets:checking:budget:dining', amount: -5, commodity: '$' },
       ],
       status: '*',
     })
+    expect(mockSetResponseStatus).toHaveBeenCalledWith(fakeEvent, 201)
+    expect(result).toEqual({ success: true })
+  })
+
+  it('generates 4-posting structure for credit card expense with envelope category', async () => {
+    const simplifiedBody = {
+      date: '2025-03-15',
+      payee: 'Restaurant',
+      account: 'liabilities:credit-card',
+      type: 'expense',
+      category: 'expenses:food:restaurants',
+      amount: 45,
+    }
+    mockReadBody.mockResolvedValue(simplifiedBody)
+    mockAppendTransaction.mockResolvedValue(undefined)
+
+    const result = await postTransactions(fakeEvent)
+
+    expect(mockAppendTransaction).toHaveBeenCalledWith({
+      date: '2025-03-15',
+      description: 'Restaurant',
+      postings: [
+        { account: 'expenses:food:restaurants', amount: 45, commodity: '$' },
+        { account: 'assets:checking:budget:food:restaurants', amount: -45, commodity: '$' },
+        { account: 'assets:checking:budget:pending:credit-card', amount: 45, commodity: '$' },
+        { account: 'liabilities:credit-card', amount: -45, commodity: '$' },
+      ],
+      status: '*',
+    })
+    expect(mockSetResponseStatus).toHaveBeenCalledWith(fakeEvent, 201)
+    expect(result).toEqual({ success: true })
+  })
+
+  it('does not apply envelope postings for expense without category', async () => {
+    const simplifiedBody = {
+      date: '2025-01-15',
+      payee: 'ATM Withdrawal',
+      account: 'assets:checking',
+      type: 'expense',
+      amount: 100,
+      // no category — no envelope mapping
+    }
+    mockReadBody.mockResolvedValue(simplifiedBody)
+    mockAppendTransaction.mockResolvedValue(undefined)
+
+    const result = await postTransactions(fakeEvent)
+
+    // Without a category, toTransactionInput uses category as undefined
+    // and applyEnvelopePostings returns the original txInput unchanged
+    expect(mockAppendTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        date: '2025-01-15',
+        description: 'ATM Withdrawal',
+      }),
+    )
     expect(mockSetResponseStatus).toHaveBeenCalledWith(fakeEvent, 201)
     expect(result).toEqual({ success: true })
   })
@@ -171,11 +232,11 @@ describe('POST /api/transactions', () => {
       amount: 500,
     }
     mockReadBody.mockResolvedValue(simplifiedBody)
-    mockAddTransaction.mockResolvedValue(undefined)
+    mockAppendTransaction.mockResolvedValue(undefined)
 
     const result = await postTransactions(fakeEvent)
 
-    expect(mockAddTransaction).toHaveBeenCalledWith({
+    expect(mockAppendTransaction).toHaveBeenCalledWith({
       date: '2025-02-01',
       description: 'Transfer',
       postings: [

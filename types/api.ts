@@ -4,6 +4,7 @@ export interface PostingInput {
   account: string
   amount?: number
   commodity?: string // defaults to "$"
+  balanceAssertion?: number
 }
 
 export interface TransactionInput {

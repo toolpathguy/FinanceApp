@@ -19,6 +19,11 @@ const addingEnvelope = ref(false)
 
 const deletingCategory = ref<string | null>(null)
 
+// Inline assignment editing state
+const editingEnvelope = ref<string | null>(null)
+const editAmount = ref('')
+const savingAssignment = ref(false)
+
 // Collapsible group state — all expanded by default
 const expandedGroups = ref<Set<string>>(new Set())
 
@@ -144,6 +149,92 @@ async function hideEnvelope(cat: BudgetCategory) {
     deletingCategory.value = null
   }
 }
+
+function startEditing(cat: BudgetCategory) {
+  editingEnvelope.value = cat.accountPath
+  editAmount.value = cat.assigned > 0 ? cat.assigned.toString() : ''
+}
+
+function cancelEditing() {
+  editingEnvelope.value = null
+  editAmount.value = ''
+}
+
+async function saveAssignment(cat: BudgetCategory) {
+  const desired = parseFloat(editAmount.value)
+  if (isNaN(desired) || desired < 0) {
+    toast.add({ title: 'Invalid amount', color: 'error' })
+    return
+  }
+
+  const currentAssigned = cat.assigned
+  const delta = desired - currentAssigned
+
+  // No change needed
+  if (Math.abs(delta) < 0.005) {
+    editingEnvelope.value = null
+    editAmount.value = ''
+    return
+  }
+
+  const envelopeKey = cat.accountPath.replace(/^expenses:/, '')
+  const budgetAccount = `assets:checking:budget:${envelopeKey}`
+  const today = new Date().toISOString().slice(0, 10)
+
+  savingAssignment.value = true
+  try {
+    if (delta > 0) {
+      // Assign more: transfer from checking to envelope
+      await $fetch('/api/budget/assign', {
+        method: 'POST',
+        body: {
+          date: today,
+          physicalAccount: 'assets:checking',
+          envelopes: { [envelopeKey]: delta },
+        },
+      })
+    } else {
+      // Reduce assignment: transfer from envelope back to unallocated
+      await $fetch('/api/budget/transfer', {
+        method: 'POST',
+        body: {
+          date: today,
+          sourceEnvelope: budgetAccount,
+          destinationEnvelope: 'assets:checking:budget:unallocated',
+          amount: Math.abs(delta),
+        },
+      })
+    }
+    // Optimistic update: patch local data so the UI feels instant
+    if (budget.value) {
+      cat.assigned = desired
+      cat.available = cat.available + delta
+      budget.value.readyToAssign -= delta
+
+      for (const group of budget.value.categoryGroups) {
+        group.assigned = group.categories.reduce((s, c) => s + c.assigned, 0)
+        group.available = group.categories.reduce((s, c) => s + c.available, 0)
+      }
+      budget.value.totalAssigned = budget.value.categoryGroups.reduce((s, g) => s + g.assigned, 0)
+      budget.value.totalAvailable = budget.value.categoryGroups.reduce((s, g) => s + g.available, 0)
+    }
+
+    toast.add({ title: 'Assignment saved', color: 'success' })
+    editingEnvelope.value = null
+    editAmount.value = ''
+
+    // Background refresh to sync with server (non-blocking)
+    refresh()
+  } catch (e: any) {
+    toast.add({
+      title: 'Failed to save assignment',
+      description: e?.data?.statusMessage || e?.message || 'Unknown error',
+      color: 'error',
+    })
+  } finally {
+    savingAssignment.value = false
+  }
+}
 </script>
 
 <template>
@@ -229,7 +320,32 @@ async function hideEnvelope(cat: BudgetCategory) {
                 class="grid grid-cols-12 gap-2 px-3 py-2 hover:bg-elevated/50 transition-colors items-center"
               >
                 <div class="col-span-5 pl-8 text-sm">{{ shortName(cat, group.name) }}</div>
-                <div class="col-span-2 text-right text-sm">{{ formatCurrency(cat.assigned) }}</div>
+                <div class="col-span-2 text-right text-sm">
+                  <template v-if="editingEnvelope === cat.accountPath">
+                    <form class="flex items-center justify-end gap-1" @submit.prevent="saveAssignment(cat)">
+                      <UInput
+                        v-model="editAmount"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="0.00"
+                        class="w-24 text-right"
+                        size="xs"
+                        autofocus
+                        @keydown.escape="cancelEditing"
+                      />
+                      <UButton type="submit" icon="i-lucide-check" size="xs" variant="ghost" :loading="savingAssignment" />
+                    </form>
+                  </template>
+                  <template v-else>
+                    <button
+                      class="cursor-pointer hover:text-primary transition-colors"
+                      @click="startEditing(cat)"
+                    >
+                      {{ formatCurrency(cat.assigned) }}
+                    </button>
+                  </template>
+                </div>
                 <div class="col-span-2 text-right text-sm" :class="activityColor(cat.activity)">{{ formatCurrency(cat.activity) }}</div>
                 <div class="col-span-2 text-right text-sm font-medium" :class="availableColor(cat.available)">{{ formatCurrency(cat.available) }}</div>
                 <div class="col-span-1 flex justify-end">

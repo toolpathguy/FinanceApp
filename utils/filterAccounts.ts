@@ -10,8 +10,11 @@
  * Preserves original order.
  */
 export function filterRealAccounts(accounts: string[]): string[] {
-  return accounts.filter(a => a.startsWith('assets:') || a.startsWith('liabilities:'))
+  return accounts.filter(a =>
+    (a.startsWith('assets:') || a.startsWith('liabilities:')) && !a.includes(':budget:')
+  )
 }
+
 
 /**
  * Returns only accounts starting with `expenses:` or `income:`.

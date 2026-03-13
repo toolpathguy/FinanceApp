@@ -60,9 +60,10 @@ Browser (Nuxt UI)  →  Nuxt 4 Server (Nitro)  →  hledger CLI  →  .journal f
 │   └── useReports.ts               # Income statement + balance sheet (placeholder)
 ├── utils/
 │   ├── buildAccountTree.ts          # Flat account paths → hierarchical tree for UTree
+│   ├── budgetAccounts.ts            # Budget account naming utilities (toBudgetSubAccount, isBudgetSubAccount, etc.)
 │   ├── formatAmount.ts              # { commodity, quantity } → "$1,234.56" or "-$42.00"
 │   ├── stripAccountPrefix.ts        # "expenses:groceries" → "Groceries" (strip first segment, title-case)
-│   ├── filterAccounts.ts            # filterRealAccounts() + filterCategoryAccounts()
+│   ├── filterAccounts.ts            # filterRealAccounts() (excludes :budget: sub-accounts) + filterCategoryAccounts()
 │   ├── deriveTransactionType.ts     # Form state → 'expense' | 'income' | 'transfer'
 │   ├── validateSimplifiedForm.ts    # SimplifiedFormState validation → error messages
 │   ├── toTransactionInput.ts        # SimplifiedTransactionInput → TransactionInput (2 balanced postings)
@@ -77,18 +78,23 @@ Browser (Nuxt UI)  →  Nuxt 4 Server (Nitro)  →  hledger CLI  →  .journal f
 │                                    # RealAccount, AccountTreeItem, TransactionFormState (legacy)
 ├── server/
 │   ├── utils/
-│   │   └── hledger.ts               # resolveJournalPath, hledgerExec, hledgerExecText,
-│   │                                # transformTransactions, transformBalanceReport, addTransaction
+│   │   ├── hledger.ts               # resolveJournalPath, hledgerExec, hledgerExecText,
+│   │   │                            # transformTransactions, transformBalanceReport, addTransaction (legacy)
+│   │   └── journalWriter.ts         # validateTransaction, formatTransaction, appendTransaction
+│   │                                # (direct journal writer — replaces hledger add stdin approach)
 │   └── api/
 │       ├── accounts.get.ts          # GET /api/accounts?type=real|category|all
 │       ├── balances.get.ts          # GET /api/balances (with transform)
 │       ├── transactions.get.ts      # GET /api/transactions (RegisterRow[] when account filter, else HledgerTransaction[])
-│       ├── transactions.post.ts     # POST /api/transactions (accepts SimplifiedTransactionInput or legacy TransactionInput)
+│       ├── transactions.post.ts     # POST /api/transactions (envelope-aware: maps expenses to budget sub-accounts)
 │       ├── transactions.delete.ts   # DELETE /api/transactions?index=N (direct journal edit)
-│       ├── budget.get.ts            # GET /api/budget?period= (BudgetEnvelopeReport with persistent categories)
+│       ├── budget.get.ts            # GET /api/budget?period= (YNAB Rule 1: Ready to Assign from all real accounts)
+│       ├── budget/
+│       │   ├── assign.post.ts       # POST /api/budget/assign (create budget assignment transaction)
+│       │   └── transfer.post.ts     # POST /api/budget/transfer (move money between envelopes)
 │       ├── categories.post.ts       # POST /api/categories (create expense account groups/envelopes)
 │       ├── hidden-envelopes.get.ts  # GET /api/hidden-envelopes (list hidden envelope paths)
-│       ├── hidden-envelopes.post.ts # POST /api/hidden-envelopes (hide/unhide envelopes)
+│       ├── hidden-envelopes.post.ts # POST /api/hidden-envelopes (hide/unhide — requires zero balance to hide)
 │       └── journal/
 │           ├── create.post.ts       # POST /api/journal/create
 │           ├── upload.post.ts       # POST /api/journal/upload
@@ -101,18 +107,24 @@ Browser (Nuxt UI)  →  Nuxt 4 Server (Nitro)  →  hledger CLI  →  .journal f
 │   └── sample.journal               # Multi-month test data (Jan 2025 – Mar 2026)
 └── .kiro/
     ├── specs/
-    │   ├── ynab-style-accounts-ux/  # Completed spec (requirements, design, tasks)
-    │   └── envelope-budget-assignments/ # Next spec (design doc ready)
+    │   ├── ynab-style-accounts-ux/          # Completed spec
+    │   ├── hledger-budget-app/              # Completed spec
+    │   ├── hledger-budget-app-ui/           # Completed spec
+    │   ├── envelope-budget-assignments/     # Completed spec (direct journal writer, budget APIs, envelope transactions)
+    │   ├── budget-page-ux/                  # Placeholder spec (inline editing perf, transfers, period nav)
+    │   ├── accounts-management-page/        # Placeholder spec (account CRUD, reconciliation)
+    │   ├── settings-page/                   # Placeholder spec (journal mgmt, preferences)
+    │   └── credit-card-usage/               # Placeholder spec (CC spending, pending payments, multi-card)
     └── steering/                    # This file + git workflow rules
 ```
 
 ## Key Design Decisions
 
 1. Delegate all accounting to hledger — no custom balance calculations
-2. New transactions go through `hledger add` via stdin
+2. New transactions go through the direct journal writer (`appendTransaction()` in `server/utils/journalWriter.ts`) — validates, formats, and appends to the journal file. Replaced the old `hledger add` stdin approach.
 3. Transaction deletion edits the journal file directly (removes transaction block by index)
 4. Transaction editing = delete original + add new (not reversal-based)
-5. Use hledger's `--budget` flag for budget vs actuals — no separate budget storage
+5. Budget envelopes are real hledger sub-accounts under `assets:checking:budget:*` — every assignment is a double-entry transaction
 6. Raw hledger JSON is transformed server-side to match app TypeScript interfaces
 7. The `accounts` command uses text output (split on newlines, trim CRLF for Windows)
 8. Server utils are plain exported functions — Nitro auto-imports from `server/utils/`
@@ -185,14 +197,51 @@ When viewing an account's transaction list, each row shows:
 
 ### Budget Page (Envelope Model)
 
-The budget page follows YNAB's envelope approach:
+The budget page follows YNAB's envelope approach using real hledger sub-accounts:
 
-- **Ready to Assign**: Total unbudgeted money (income received minus total assigned to categories)
-- **Category Groups**: Groupings of budget categories (e.g., "Bills", "Everyday", "Savings Goals")
-- **Each Category Row**: Shows Assigned (budgeted) | Activity (spent this period) | Available (remaining in envelope)
-- Categories map to hledger expense accounts
-- "Assigning" money to a category is a virtual allocation — tracked via hledger budget directives or a separate budget config
-- Activity is pulled from actual transactions categorized to that expense account
+- **Ready to Assign**: Computed as `net real account balance (checking + savings - credit card) - sum of envelope balances`. Follows YNAB Rule 1: every dollar has a job.
+- **Category Groups**: Groupings of budget categories (e.g., "Food", "Housing", "Entertainment")
+- **Each Category Row**: Shows Assigned (this period) | Activity (spent this period) | Available (cumulative running balance incl. rollover)
+- **Assigned** = period-scoped: derived from budget sub-account period delta + |period activity|
+- **Activity** = period-scoped: expense spending from hledger `bal expenses: -p <period>`
+- **Available** = cumulative: running balance of `assets:checking:budget:{category}` (includes rollover from prior months)
+- **Inline Assignment Editing**: Click the Assigned cell to edit — computes delta from current assigned, creates assignment or transfer transaction
+- Categories map to hledger expense accounts; budget envelopes are `assets:checking:budget:{category}` sub-accounts
+- Hidden envelopes must have zero balance before hiding (prevents money from disappearing from the budget view)
+
+### Envelope Account Structure
+
+```
+assets:checking                              ← physical account (always $0 when fully assigned)
+assets:checking:budget:food:groceries        ← envelope
+assets:checking:budget:housing:rent          ← envelope
+assets:checking:budget:entertainment         ← envelope
+assets:checking:budget:unallocated           ← unassigned money
+assets:checking:budget:pending:credit-card   ← money set aside for CC payments
+assets:savings                               ← physical account (included in Ready to Assign)
+liabilities:credit-card                      ← liability (included in Ready to Assign)
+```
+
+### Envelope Transaction Types
+
+| User Action | hledger Transaction |
+|---|---|
+| Record income | Credit income, debit checking → then assign to envelopes |
+| Assign to envelope | Transfer from checking to budget sub-account |
+| Record expense (debit) | Debit expense, credit budget sub-account |
+| Record CC expense | 4-posting: expense debit, budget credit, pending CC debit, liability credit |
+| Transfer between envelopes | Transfer between budget sub-accounts |
+| Pay credit card | Debit pending:credit-card, credit liabilities:credit-card |
+
+### Direct Journal Writer
+
+The `server/utils/journalWriter.ts` module replaces `hledger add` stdin for writing transactions:
+
+- `validateTransaction()` — validates date, description, postings, balance, omitted amounts
+- `formatTransaction()` — produces valid hledger journal syntax with 4-space indented postings
+- `appendTransaction()` — validates, formats, and appends to journal via `fs.appendFile()`
+- Supports balance assertions (`= $0.00`) on postings
+- No hledger process spawning — direct file append is faster and more predictable
 
 ### Category Management
 
@@ -252,15 +301,17 @@ Balance report JSON is a tuple `[[rows...], [totals...]]` where each row is `[fu
 
 | Method | Path | Purpose | Status |
 |--------|------|---------|--------|
-| GET | `/api/accounts?type=` | List account names with optional type filter (real/category/all) | Done |
+| GET | `/api/accounts?type=` | List account names with optional type filter (real/category/all). Real filter excludes `:budget:` sub-accounts. | Done |
 | GET | `/api/balances` | Account balances with transforms | Done |
 | GET | `/api/transactions` | RegisterRow[] when account filter present, else HledgerTransaction[] | Done |
-| POST | `/api/transactions` | Add transaction (accepts SimplifiedTransactionInput or legacy TransactionInput) | Done |
+| POST | `/api/transactions` | Add transaction — envelope-aware: expenses map to budget sub-accounts, CC expenses generate 4-posting structure | Done |
 | DELETE | `/api/transactions?index=N` | Delete transaction by journal index | Done |
-| GET | `/api/budget?period=` | BudgetEnvelopeReport with persistent categories and period-filtered activity | Done |
+| GET | `/api/budget?period=` | BudgetEnvelopeReport — YNAB Rule 1 Ready to Assign (all real accounts), period-scoped Assigned/Activity, cumulative Available | Done |
+| POST | `/api/budget/assign` | Create budget assignment transaction (debit checking, credit envelope sub-accounts) | Done |
+| POST | `/api/budget/transfer` | Transfer money between envelopes (debit source, credit destination) | Done |
 | POST | `/api/categories` | Create expense account groups/envelopes | Done |
 | GET | `/api/hidden-envelopes` | List hidden envelope account paths | Done |
-| POST | `/api/hidden-envelopes` | Hide/unhide envelopes | Done |
+| POST | `/api/hidden-envelopes` | Hide/unhide envelopes — requires zero balance before hiding | Done |
 | POST | `/api/journal/create` | Create new empty journal file | Done |
 | POST | `/api/journal/upload` | Upload journal file content | Done |
 | GET | `/api/journal/export` | Export current journal as text | Done |
@@ -269,14 +320,19 @@ Balance report JSON is a tuple `[[rows...], [totals...]]` where each row is `[fu
 
 ## Known Issues & Lessons Learned
 
-### hledger add stdin behavior
-`hledger add` in interactive/stdin mode does NOT reject unbalanced transactions. Input validation for balanced amounts must happen in the app layer if needed.
+### hledger add stdin behavior (REPLACED)
+`hledger add` in interactive/stdin mode does NOT reject unbalanced transactions, can't handle balance assertions, and spawns a child process per transaction. Replaced with the direct journal writer (`server/utils/journalWriter.ts`) which validates, formats, and appends directly to the journal file.
 
 ### Windows CRLF in hledger output
 On Windows, `hledger accounts` outputs lines with `\r\n`. The text parser must use `split(/\r?\n/)` and `.map(s => s.trim())` to avoid `\r` characters in account names (which caused `%0D` in URLs).
 
 ### hledger accounts doesn't support -O json
 The `accounts` command only outputs plain text. Use `hledgerExecText` instead of `hledgerExec`.
+
+### tsconfig must extend .nuxt/tsconfig.json
+
+### Balance assertions in budget assignments
+The `= $0.00` balance assertion on the physical account posting should ONLY be used in hand-crafted full budget assignments where all income is distributed at once. The budget assign API endpoint does NOT include balance assertions — a single-envelope assignment from the budget page won't zero out checking, so asserting $0 would cause hledger to reject the entire journal.
 
 ### tsconfig must extend .nuxt/tsconfig.json
 The root `tsconfig.json` must be `{ "extends": "./.nuxt/tsconfig.json" }` for `nuxi typecheck` to work. The Nuxt-generated tsconfig provides all auto-import types, path aliases, and `noUncheckedIndexedAccess`.

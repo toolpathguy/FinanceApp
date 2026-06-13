@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fc from 'fast-check'
-import { formatTransaction, validateTransaction, appendTransaction } from '../journalWriter'
+import { formatTransaction, validateTransaction, appendTransaction, fieldHasIllegalChars } from '../journalWriter'
 import type { TransactionInput, PostingInput } from '../../../types/api'
 import { writeFile, readFile, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -202,6 +202,52 @@ describe('P6: Formatted transactions are parseable by hledger', () => {
   })
 })
 
+
+/**
+ * Property P9: Control characters in any free-text field are always rejected
+ * (Issue #2, R1). For any otherwise-valid transaction, injecting a \r/\n/\t into
+ * the description, an account, or a commodity yields a validation error; clean
+ * inputs are unaffected.
+ *
+ * **Validates: Requirements R1.1, R1.2, R1.3**
+ */
+describe('P9: control characters are rejected in free-text fields', () => {
+  const ctrl = fc.constantFrom('\n', '\r', '\t')
+
+  it('rejects a control char injected into the description', () => {
+    fc.assert(
+      fc.property(arbTransactionInput(), ctrl, (input, c) => {
+        const errors = validateTransaction({ ...input, description: `${input.description}${c}evil` })
+        expect(errors.length).toBeGreaterThan(0)
+      }),
+      { numRuns: 100 }
+    )
+  })
+
+  it('rejects a control char injected into a posting account', () => {
+    fc.assert(
+      fc.property(arbTransactionInput(), ctrl, (input, c) => {
+        const postings = input.postings.map((p, i) =>
+          i === 0 ? { ...p, account: `${p.account}${c}income:fraud` } : p
+        )
+        const errors = validateTransaction({ ...input, postings })
+        expect(errors.length).toBeGreaterThan(0)
+      }),
+      { numRuns: 100 }
+    )
+  })
+
+  it('agrees with fieldHasIllegalChars: clean inputs validate', () => {
+    fc.assert(
+      fc.property(arbTransactionInput(), (input) => {
+        // arbTransactionInput never emits control chars, so the guard is false
+        expect(fieldHasIllegalChars(input.description)).toBe(false)
+        expect(validateTransaction(input)).toEqual([])
+      }),
+      { numRuns: 100 }
+    )
+  })
+})
 
 /**
  * Property P8: Append is non-destructive

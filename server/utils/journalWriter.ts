@@ -3,6 +3,20 @@ import type { TransactionInput } from '../../types/api'
 import { resolveJournalPath } from './hledger'
 
 /**
+ * Characters that must never appear in a free-text field written to the journal.
+ * `\n`/`\r` would let a value forge new postings or transactions; `\t` is
+ * hledger's amount delimiter. `;` (comment) is intentionally allowed — it's
+ * legal in a payee and, on a single line, can only comment out the rest of that
+ * same line, never inject a new transaction.
+ */
+const ILLEGAL_FIELD_CHARS = /[\r\n\t]/
+
+/** True if a free-text field contains a newline/tab that could corrupt the journal. */
+export function fieldHasIllegalChars(value: string): boolean {
+  return ILLEGAL_FIELD_CHARS.test(value)
+}
+
+/**
  * Validate a TransactionInput before writing to ensure journal integrity.
  *
  * Validation rules:
@@ -12,6 +26,9 @@ import { resolveJournalPath } from './hledger'
  * 4. All postings must have non-empty account names
  * 5. Postings with explicit amounts must sum to zero (balanced)
  * 6. At most one posting may omit the amount (hledger infers it)
+ * 7. Description must not contain control chars (\r \n \t)
+ * 8. Posting accounts must not contain control chars
+ * 9. Posting commodities must not contain control chars
  *
  * @returns Array of error strings. Empty array means valid.
  */
@@ -69,6 +86,24 @@ export function validateTransaction(input: TransactionInput): string[] {
     const omittedCount = input.postings.filter(p => p.amount === undefined).length
     if (omittedCount > 1) {
       errors.push(`At most one posting may omit the amount (found ${omittedCount} without amounts)`)
+    }
+  }
+
+  // Rule 7: Description must not contain control characters
+  if (input.description && fieldHasIllegalChars(input.description)) {
+    errors.push('Description must not contain newline or tab characters')
+  }
+
+  // Rules 8 & 9: Posting accounts and commodities must not contain control characters
+  if (input.postings) {
+    for (let i = 0; i < input.postings.length; i++) {
+      const posting = input.postings[i]!
+      if (posting.account && fieldHasIllegalChars(posting.account)) {
+        errors.push(`Posting ${i + 1} account must not contain newline or tab characters`)
+      }
+      if (posting.commodity !== undefined && fieldHasIllegalChars(posting.commodity)) {
+        errors.push(`Posting ${i + 1} commodity must not contain newline or tab characters`)
+      }
     }
   }
 

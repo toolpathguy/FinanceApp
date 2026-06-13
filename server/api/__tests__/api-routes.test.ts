@@ -347,13 +347,14 @@ describe('GET /api/transactions', () => {
     expect(mockHledgerExec).toHaveBeenCalledWith(['print', '-e', '2025-12-31'])
   })
 
-  it('passes account as positional argument to hledger', async () => {
+  it('passes account as a query term after a -- separator to hledger', async () => {
+    // Issue #2, R4.3: account goes after `--` so it can't be read as a flag.
     mockGetQuery.mockReturnValue({ account: 'expenses' })
     mockHledgerExec.mockResolvedValue([])
 
     await getTransactions(fakeEvent)
 
-    expect(mockHledgerExec).toHaveBeenCalledWith(['print', 'expenses'])
+    expect(mockHledgerExec).toHaveBeenCalledWith(['print', '--', 'expenses'])
   })
 
   it('passes all query params together', async () => {
@@ -362,7 +363,7 @@ describe('GET /api/transactions', () => {
 
     await getTransactions(fakeEvent)
 
-    expect(mockHledgerExec).toHaveBeenCalledWith(['print', '-b', '2025-01-01', '-e', '2025-06-30', 'assets:bank'])
+    expect(mockHledgerExec).toHaveBeenCalledWith(['print', '-b', '2025-01-01', '-e', '2025-06-30', '--', 'assets:bank'])
   })
 
   it('calls hledger with only print when no query params', async () => {

@@ -113,6 +113,53 @@ describe('validateTransaction()', () => {
     const errors = validateTransaction({ ...validInput, status: '!' })
     expect(errors).toEqual([])
   })
+
+  // --- Rules 7-9: control-character rejection (Issue #2, R1) ---
+
+  it('returns error for a newline in the description', () => {
+    const errors = validateTransaction({
+      ...validInput,
+      description: 'Coffee\n2020-01-01 Steal\n  assets:checking  $-9999',
+    })
+    expect(errors.some(e => /newline or tab/i.test(e))).toBe(true)
+  })
+
+  it('returns error for a carriage return in the description', () => {
+    const errors = validateTransaction({ ...validInput, description: 'Coffee\rShop' })
+    expect(errors.some(e => /newline or tab/i.test(e))).toBe(true)
+  })
+
+  it('returns error for a tab in the description', () => {
+    const errors = validateTransaction({ ...validInput, description: 'Coffee\tShop' })
+    expect(errors.some(e => /newline or tab/i.test(e))).toBe(true)
+  })
+
+  it('returns error for a newline in a posting account', () => {
+    const errors = validateTransaction({
+      ...validInput,
+      postings: [
+        { account: 'expenses:dining\n  income:fraud', amount: 5.0 },
+        { account: 'assets:checking', amount: -5.0 },
+      ],
+    })
+    expect(errors.some(e => /account must not contain/i.test(e))).toBe(true)
+  })
+
+  it('returns error for a newline in a posting commodity', () => {
+    const errors = validateTransaction({
+      ...validInput,
+      postings: [
+        { account: 'expenses:dining', amount: 5.0, commodity: '$\nx' },
+        { account: 'assets:checking', amount: -5.0 },
+      ],
+    })
+    expect(errors.some(e => /commodity must not contain/i.test(e))).toBe(true)
+  })
+
+  it('accepts a semicolon and unicode in the description (not control chars)', () => {
+    const errors = validateTransaction({ ...validInput, description: 'Smith; Co — café ☕' })
+    expect(errors).toEqual([])
+  })
 })
 
 // --- formatTransaction() tests ---

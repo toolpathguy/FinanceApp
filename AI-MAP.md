@@ -60,9 +60,18 @@ format → `fs.appendFile`). Deletes: edit journal by transaction index.
 | * | `/api/journal/{create,upload,export,activate,list}` | Journal file management |
 
 ## Server utils (`server/utils/`, Nitro auto-imported)
-- `hledger.ts` — `resolveJournalPath`, `hledgerExec`, `hledgerExecText`,
+- `hledger.ts` — `resolveJournalPath` (precedence: `config/active-journal.json`
+  → `LEDGER_FILE` → `test-data/sample.journal`), `hledgerExec`, `hledgerExecText`,
   `transformTransactions`, `transformBalanceReport`, `addTransaction` (legacy).
-- `journalWriter.ts` — `validateTransaction`, `formatTransaction`, `appendTransaction`.
+  Re-exports `SAMPLE_JOURNAL`/`ACTIVE_JOURNAL_CONFIG`. Guard-tested to never import `fs`.
+- `activeJournal.ts` — owns reading `config/active-journal.json` (`readActiveJournalPath`)
+  + the `SAMPLE_JOURNAL`/`ACTIVE_JOURNAL_CONFIG` constants (kept out of `hledger.ts`).
+- `journalWriter.ts` — `validateTransaction`, `formatTransaction`, `appendTransaction`,
+  `fieldHasIllegalChars` (rejects `\r\n\t` in free-text fields — journal-injection guard).
+- `journalFiles.ts` — `JOURNALS_DIR`, `safeJournalPath` (path-traversal guard for
+  create/upload/activate; throws 400 on separators/`..`/bad extension).
+- `hledgerArgs.ts` — pure `isValidDate`/`isValidPeriod`/`isValidAccount` (arg-injection
+  guards for read-route query params).
 
 ## Pure utils (`utils/`) — property-tested
 `formatAmount`, `stripAccountPrefix`, `buildAccountTree`, `filterAccounts`
@@ -83,6 +92,13 @@ RegisterRow, BudgetCategory/Group, BudgetEnvelopeReport, RealAccount, AccountTre
 - **UTree leaf nodes** need `children: undefined` (not `[]`) to be selectable.
 - **UCard slots:** `header` / default / `footer` — there is no `#body`.
 - **tsconfig** must extend `./.nuxt/tsconfig.json` for typecheck.
+- **Input validation (Issue #2):** free-text journal fields reject `\r\n\t`
+  (`fieldHasIllegalChars`); journal filenames must pass `safeJournalPath` (no
+  traversal); `activate` only accepts files inside `JOURNALS_DIR` or the sample;
+  read-route query params (`account`/`startDate`/`endDate`/`period`) are validated
+  via `hledgerArgs` and account queries are passed after a `--` separator.
+- **Active journal** is persisted to `config/active-journal.json` (gitignored),
+  not `process.env` — set by `journal/activate.post`, read by `resolveJournalPath`.
 
 ## Tests
 Beside source: `*.test.ts` (unit), `*.property.test.ts` (fast-check). API tests

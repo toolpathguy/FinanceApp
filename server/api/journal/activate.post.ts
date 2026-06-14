@@ -1,8 +1,8 @@
-import { existsSync } from 'node:fs'
 import { writeFile, mkdir } from 'node:fs/promises'
 import { dirname, resolve, sep } from 'node:path'
 import { JOURNALS_DIR } from '../../utils/journalFiles'
 import { SAMPLE_JOURNAL, ACTIVE_JOURNAL_CONFIG } from '../../utils/hledger'
+import { pathExists } from '../../utils/fsExists'
 
 /**
  * Activate a journal (Issue #2, R3).
@@ -29,7 +29,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Journal must be a managed file in the journals directory' })
   }
 
-  if (!existsSync(resolved)) {
+  if (!(await pathExists(resolved))) {
     throw createError({ statusCode: 404, statusMessage: 'Journal file not found' })
   }
 

@@ -25,12 +25,18 @@ function isFamilyPosting(account: string, accountPath: string): boolean {
  * expenses that only move money between envelopes — are internal to the account
  * and omitted. Category/payee are derived from the postings *outside* the family
  * (the expense/income/other-account leg).
+ *
+ * `openingBalance` seeds the running balance (Issue #4 item 4). When a register
+ * is date-filtered, callers pass the family balance as of the day before the
+ * window so the Balance column reflects the true balance, not one reset to $0.
+ * Defaults to 0 (full-history register).
  */
 export function toRegisterRows(
   transactions: HledgerTransaction[],
   accountPath: string,
+  openingBalance = 0,
 ): RegisterRow[] {
-  let runningBalance = 0
+  let runningBalance = openingBalance
   const rows: RegisterRow[] = []
 
   for (const tx of transactions) {

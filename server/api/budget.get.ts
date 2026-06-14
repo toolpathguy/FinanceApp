@@ -3,11 +3,11 @@ import { stripAccountPrefix } from '../../utils/stripAccountPrefix'
 import { singleQuantity, MultiCommodityError } from '../../utils/singleQuantity'
 import { isValidPeriod } from '../utils/hledgerArgs'
 import { readFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { pathExists } from '../utils/fsExists'
 
 async function loadHiddenEnvelopes(): Promise<Set<string>> {
   const path = 'config/hidden-envelopes.json'
-  if (!existsSync(path)) return new Set()
+  if (!(await pathExists(path))) return new Set()
   try {
     const list = JSON.parse(await readFile(path, 'utf-8')) as string[]
     return new Set(list)
@@ -41,6 +41,14 @@ export default defineEventHandler(async (event) => {
   const hiddenSet = await loadHiddenEnvelopes()
   const expenseAccounts = allAccounts.filter(a => a.startsWith('expenses:') && !hiddenSet.has(a))
 
+  // Derive the budget base from the account list (Issue #4 item 3) — no extra
+  // hledger call. All budget sub-account queries/keys hang off this prefix
+  // instead of a hardcoded `assets:checking:budget:`.
+  const budgetBase = await resolveBudgetBase(allAccounts)
+  const budgetPrefix = `${budgetBase}:budget:`
+  const unallocatedAccount = `${budgetPrefix}unallocated`
+  const pendingPrefix = `${budgetPrefix}pending:`
+
   // 2. Fetch period-filtered expense activity (Activity column)
   const expenseArgs = ['bal', 'expenses:']
   if (pd) expenseArgs.push('-p', pd)
@@ -63,7 +71,7 @@ export default defineEventHandler(async (event) => {
 
   try {
     // a) Cumulative balances — Available is the all-time running balance
-    const cumulativeArgs = ['bal', 'assets:checking:budget:']
+    const cumulativeArgs = ['bal', budgetPrefix]
     const cumulativeRaw = await hledgerExec(cumulativeArgs)
     const cumulativeReport = transformBalanceReport(cumulativeRaw)
 
@@ -72,11 +80,11 @@ export default defineEventHandler(async (event) => {
       const account = row.account as string
       const balance = singleQuantity(row.amounts, `budget balance for ${account}`)
 
-      if (account.startsWith('assets:checking:budget:')) {
+      if (account.startsWith(budgetPrefix)) {
         totalAllBudgetSubAccounts += balance
-        if (account !== 'assets:checking:budget:unallocated'
-          && !account.startsWith('assets:checking:budget:pending:')) {
-          const categoryKey = account.replace(/^assets:checking:budget:/, '')
+        if (account !== unallocatedAccount
+          && !account.startsWith(pendingPrefix)) {
+          const categoryKey = account.slice(budgetPrefix.length)
           budgetBalanceMap.set(categoryKey, balance)
           totalBudgetEnvelopes += balance
         }
@@ -99,24 +107,24 @@ export default defineEventHandler(async (event) => {
     const netRealBalance = singleQuantity(realBalReport.totals, 'net real account balance')
 
     // Subtract all envelope balances (including pending CC) from net real balance
-    const unallocatedRow = cumulativeReport.rows.find((r: any) => r.account === 'assets:checking:budget:unallocated')
+    const unallocatedRow = cumulativeReport.rows.find((r: any) => r.account === unallocatedAccount)
     const envelopesAndPending = totalAllBudgetSubAccounts
       - singleQuantity(unallocatedRow?.amounts, 'unallocated balance')
     readyToAssign = netRealBalance - envelopesAndPending
 
     // b) Period-scoped delta — net change in budget sub-accounts this period
     if (pd) {
-      const periodArgs = ['bal', 'assets:checking:budget:', '-p', pd]
+      const periodArgs = ['bal', budgetPrefix, '-p', pd]
       const periodRaw = await hledgerExec(periodArgs)
       const periodReport = transformBalanceReport(periodRaw)
 
       for (const row of periodReport.rows) {
         const account = row.account as string
         const delta = singleQuantity(row.amounts, `budget period delta for ${account}`)
-        if (account.startsWith('assets:checking:budget:')
-          && account !== 'assets:checking:budget:unallocated'
-          && !account.startsWith('assets:checking:budget:pending:')) {
-          const categoryKey = account.replace(/^assets:checking:budget:/, '')
+        if (account.startsWith(budgetPrefix)
+          && account !== unallocatedAccount
+          && !account.startsWith(pendingPrefix)) {
+          const categoryKey = account.slice(budgetPrefix.length)
           budgetPeriodDeltaMap.set(categoryKey, delta)
         }
       }

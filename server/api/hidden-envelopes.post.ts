@@ -1,10 +1,10 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { pathExists } from '../utils/fsExists'
 
 const CONFIG_PATH = 'config/hidden-envelopes.json'
 
 async function loadHidden(): Promise<string[]> {
-  if (!existsSync(CONFIG_PATH)) return []
+  if (!(await pathExists(CONFIG_PATH))) return []
   try {
     return JSON.parse(await readFile(CONFIG_PATH, 'utf-8'))
   } catch {
@@ -13,7 +13,7 @@ async function loadHidden(): Promise<string[]> {
 }
 
 async function saveHidden(list: string[]): Promise<void> {
-  if (!existsSync('config')) await mkdir('config', { recursive: true })
+  if (!(await pathExists('config'))) await mkdir('config', { recursive: true })
   await writeFile(CONFIG_PATH, JSON.stringify(list, null, 2), 'utf-8')
 }
 

@@ -17,10 +17,10 @@ function isLegacyInput(body: any): body is TransactionInput {
  * - For liability accounts: 4-posting (expense debit, budget sub-account credit,
  *   pending credit card budget debit, liability credit)
  */
-function applyEnvelopePostings(
+async function applyEnvelopePostings(
   txInput: TransactionInput,
   body: SimplifiedTransactionInput,
-): TransactionInput {
+): Promise<TransactionInput> {
   if (body.type !== 'expense' || !body.category) {
     return txInput
   }
@@ -29,8 +29,10 @@ function applyEnvelopePostings(
   const envelopeCategory = body.category.replace(/^expenses:/, '')
 
   if (body.account.startsWith('liabilities:')) {
-    // Credit card expense: 4-posting structure
-    const budgetBase = 'assets:checking'
+    // Credit card expense: 4-posting structure. Derive the budget base from the
+    // journal (Issue #4 item 3) rather than hardcoding `assets:checking`, so a
+    // non-default primary account routes its envelope postings correctly.
+    const budgetBase = await resolveBudgetBase()
     const liabilityName = body.account.replace(/^liabilities:/, '')
     return {
       ...txInput,
@@ -61,11 +63,18 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event)
 
   if (isSimplifiedInput(body)) {
-    if (!body.date || !body.payee || !body.account || !body.amount) {
+    if (!body.date || !body.payee || !body.account) {
       throw createError({ statusCode: 400, message: 'Missing required fields' })
     }
+    // Validate amount explicitly (Issue #4 item 2): the old `!body.amount` guard
+    // rejected a legitimate 0 yet ACCEPTED negatives, which silently invert
+    // posting signs downstream. In the YNAB model amounts are positive
+    // magnitudes; direction comes from `type`.
+    if (typeof body.amount !== 'number' || !Number.isFinite(body.amount) || body.amount <= 0) {
+      throw createError({ statusCode: 400, message: 'Amount must be a positive number' })
+    }
     let txInput = toTransactionInput(body)
-    txInput = applyEnvelopePostings(txInput, body)
+    txInput = await applyEnvelopePostings(txInput, body)
     try {
       await appendTransaction(txInput)
     } catch (err: any) {

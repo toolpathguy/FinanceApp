@@ -135,6 +135,28 @@ describe('toRegisterRows — Property Tests', () => {
   })
 
   /**
+   * Property 5b: openingBalance shifts every running balance by exactly the seed
+   * (Issue #4 item 4). Seeding must not change which rows appear or their
+   * inflow/outflow — only the balance offset.
+   */
+  it('Property 5b: openingBalance offsets every runningBalance by the seed', () => {
+    fc.assert(
+      fc.property(arbTransactionList(testAccount), fc.integer({ min: -100000, max: 100000 }), (txs, seedCents) => {
+        const seed = seedCents / 100
+        const base = toRegisterRows(txs, testAccount)
+        const seeded = toRegisterRows(txs, testAccount, seed)
+
+        expect(seeded).toHaveLength(base.length)
+        for (let i = 0; i < base.length; i++) {
+          expect(seeded[i]!.runningBalance).toBeCloseTo(base[i]!.runningBalance + seed, 6)
+          expect(seeded[i]!.inflow).toBe(base[i]!.inflow)
+          expect(seeded[i]!.outflow).toBe(base[i]!.outflow)
+        }
+      }),
+    )
+  })
+
+  /**
    * Property 6: Transfer detection and category derivation
    *
    * For any list of HledgerTransactions and account path, every RegisterRow

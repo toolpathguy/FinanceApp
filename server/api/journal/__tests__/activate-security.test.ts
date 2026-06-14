@@ -4,14 +4,17 @@ import { join, resolve } from 'node:path'
 // Issue #2, R3: activation is restricted to managed journals + the sample, and
 // the choice is persisted to config/active-journal.json (not process.env only).
 
+// activate.post now uses the async pathExists helper (Issue #4 item 5b), which
+// calls fs/promises.access. mockExistsSync remains the existence oracle: access
+// resolves when it returns true, rejects otherwise.
 const mockExistsSync = vi.fn()
-vi.mock('node:fs', () => ({ existsSync: (...a: any[]) => mockExistsSync(...a) }))
 
 const mockWriteFile = vi.fn()
 const mockMkdir = vi.fn()
 vi.mock('node:fs/promises', () => ({
   writeFile: (...a: any[]) => mockWriteFile(...a),
   mkdir: (...a: any[]) => mockMkdir(...a),
+  access: (...a: any[]) => (mockExistsSync(...a) ? Promise.resolve() : Promise.reject(new Error('ENOENT'))),
 }))
 
 const mockReadBody = vi.fn()

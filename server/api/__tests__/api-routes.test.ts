@@ -29,6 +29,11 @@ vi.mock('../../utils/journalWriter', () => ({
 const mockHledgerExecText = vi.fn()
 vi.stubGlobal('hledgerExecText', mockHledgerExecText)
 
+// Budget base derivation (Issue #4 item 3). Defaults to assets:checking;
+// individual tests can override with mockResolvedValueOnce.
+const mockResolveBudgetBase = vi.fn().mockResolvedValue('assets:checking')
+vi.stubGlobal('resolveBudgetBase', mockResolveBudgetBase)
+
 const mockTransformTransactions = vi.fn((raw: any[]) => raw)
 const mockTransformBalanceReport = vi.fn((raw: any) => raw)
 vi.stubGlobal('transformTransactions', mockTransformTransactions)
@@ -196,6 +201,35 @@ describe('POST /api/transactions', () => {
     expect(result).toEqual({ success: true })
   })
 
+  it('routes credit-card envelope postings to the derived (non-default) budget base', async () => {
+    // Issue #4 item 3: budget base comes from resolveBudgetBase, not a literal.
+    mockResolveBudgetBase.mockResolvedValueOnce('assets:bank:everyday')
+    const simplifiedBody = {
+      date: '2025-03-15',
+      payee: 'Restaurant',
+      account: 'liabilities:credit-card',
+      type: 'expense',
+      category: 'expenses:food:restaurants',
+      amount: 45,
+    }
+    mockReadBody.mockResolvedValue(simplifiedBody)
+    mockAppendTransaction.mockResolvedValue(undefined)
+
+    await postTransactions(fakeEvent)
+
+    expect(mockAppendTransaction).toHaveBeenCalledWith({
+      date: '2025-03-15',
+      description: 'Restaurant',
+      postings: [
+        { account: 'expenses:food:restaurants', amount: 45, commodity: '$' },
+        { account: 'assets:bank:everyday:budget:food:restaurants', amount: -45, commodity: '$' },
+        { account: 'assets:bank:everyday:budget:pending:credit-card', amount: 45, commodity: '$' },
+        { account: 'liabilities:credit-card', amount: -45, commodity: '$' },
+      ],
+      status: '*',
+    })
+  })
+
   it('does not apply envelope postings for expense without category', async () => {
     const simplifiedBody = {
       date: '2025-01-15',
@@ -269,6 +303,43 @@ describe('POST /api/transactions', () => {
       statusCode: 400,
       message: 'Unrecognized transaction format',
     })
+  })
+
+  // Issue #4 item 2: amount must be a positive finite number.
+  const simplifiedWith = (amount: unknown) => ({
+    date: '2025-01-15',
+    payee: 'Coffee Shop',
+    account: 'assets:checking',
+    type: 'expense',
+    category: 'expenses:dining',
+    amount,
+  })
+
+  it.each([
+    ['a negative amount', -5],
+    ['a zero amount', 0],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['a non-numeric amount', '50' as unknown],
+  ])('returns 400 for %s', async (_label, amount) => {
+    mockReadBody.mockResolvedValue(simplifiedWith(amount))
+
+    await expect(postTransactions(fakeEvent)).rejects.toMatchObject({
+      statusCode: 400,
+      message: 'Amount must be a positive number',
+    })
+    expect(mockAppendTransaction).not.toHaveBeenCalled()
+  })
+
+  it('accepts a positive amount and returns 201', async () => {
+    mockReadBody.mockResolvedValue(simplifiedWith(5))
+    mockAppendTransaction.mockResolvedValue(undefined)
+
+    const result = await postTransactions(fakeEvent)
+
+    expect(mockAppendTransaction).toHaveBeenCalled()
+    expect(mockSetResponseStatus).toHaveBeenCalledWith(fakeEvent, 201)
+    expect(result).toEqual({ success: true })
   })
 })
 
@@ -373,6 +444,42 @@ describe('GET /api/transactions', () => {
     await getTransactions(fakeEvent)
 
     expect(mockHledgerExec).toHaveBeenCalledWith(['print'])
+  })
+
+  // Issue #4 item 4: a date-filtered register seeds the opening balance.
+  it('seeds the running balance from a bal -e <startDate> query for a filtered account', async () => {
+    mockGetQuery.mockReturnValue({ startDate: '2025-02-01', account: 'assets:checking' })
+    mockHledgerExec
+      .mockResolvedValueOnce([
+        {
+          date: '2025-02-10',
+          description: 'Coffee',
+          status: '*',
+          index: 1,
+          postings: [
+            { account: 'assets:checking', amounts: [{ commodity: '$', quantity: -5 }] },
+            { account: 'expenses:dining', amounts: [{ commodity: '$', quantity: 5 }] },
+          ],
+        },
+      ]) // print
+      .mockResolvedValueOnce({ totals: [{ commodity: '$', quantity: 1000 }] }) // bal seed
+
+    const rows = await getTransactions(fakeEvent)
+
+    // The opening-balance query is issued with exclusive end = startDate.
+    expect(mockHledgerExec).toHaveBeenCalledWith(['bal', '-e', '2025-02-01', '--', 'assets:checking'])
+    // First row balance = $1000 opening − $5 = $995, not −$5.
+    expect(rows[0].runningBalance).toBe(995)
+  })
+
+  it('does not issue a seed query when no startDate is supplied', async () => {
+    mockGetQuery.mockReturnValue({ account: 'assets:checking' })
+    mockHledgerExec.mockResolvedValue([])
+
+    await getTransactions(fakeEvent)
+
+    expect(mockHledgerExec).toHaveBeenCalledTimes(1)
+    expect(mockHledgerExec).toHaveBeenCalledWith(['print', '--', 'assets:checking'])
   })
 })
 

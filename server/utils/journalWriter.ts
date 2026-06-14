@@ -2,6 +2,20 @@ import { appendFile } from 'node:fs/promises'
 import type { TransactionInput } from '../../types/api'
 import { resolveJournalPath } from './hledger'
 
+/** Round a dollar amount to integer cents (the journal's unit of precision). */
+function toCents(amount: number): number {
+  return Math.round(amount * 100)
+}
+
+/**
+ * Format a dollar amount as a 2-decimal string via integer cents, so that any
+ * set of amounts whose cents sum to zero also sums to zero once written.
+ * e.g. -5 → "$-5.00", 123.45 → "$123.45".
+ */
+function formatMoney(amount: number, commodity: string): string {
+  return `${commodity}${(toCents(amount) / 100).toFixed(2)}`
+}
+
 /**
  * Validate a TransactionInput before writing to ensure journal integrity.
  *
@@ -52,14 +66,15 @@ export function validateTransaction(input: TransactionInput): string[] {
     }
   }
 
-  // Rule 5: Postings with explicit amounts must sum to zero
+  // Rule 5: Postings with explicit amounts must sum to zero.
+  // Compare in integer cents (not a float tolerance) — the journal is written at
+  // 2-decimal precision, so "balanced" means the cents sum is exactly zero.
   if (input.postings && input.postings.length >= 2) {
     const postingsWithAmounts = input.postings.filter(p => p.amount !== undefined)
     if (postingsWithAmounts.length === input.postings.length) {
-      // All postings have explicit amounts — they must sum to zero
-      const sum = postingsWithAmounts.reduce((acc, p) => acc + p.amount!, 0)
-      if (Math.abs(sum) > 0.001) {
-        errors.push(`Postings with explicit amounts do not sum to zero (sum: ${sum})`)
+      const centsSum = postingsWithAmounts.reduce((acc, p) => acc + toCents(p.amount!), 0)
+      if (centsSum !== 0) {
+        errors.push(`Postings with explicit amounts do not sum to zero (sum: ${(centsSum / 100).toFixed(2)})`)
       }
     }
   }
@@ -103,11 +118,11 @@ export function formatTransaction(input: TransactionInput): string {
     let line = `    ${posting.account}`
 
     if (posting.amount !== undefined) {
-      line += `  ${commodity}${posting.amount.toFixed(2)}`
+      line += `  ${formatMoney(posting.amount, commodity)}`
     }
 
     if (posting.balanceAssertion !== undefined) {
-      line += `  = ${commodity}${posting.balanceAssertion.toFixed(2)}`
+      line += `  = ${formatMoney(posting.balanceAssertion, commodity)}`
     }
 
     lines.push(line)

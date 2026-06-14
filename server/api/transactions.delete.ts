@@ -13,6 +13,17 @@ export default defineEventHandler(async (event) => {
 
   const filePath = resolveJournalPath()
   const content = await readFile(filePath, 'utf-8')
+
+  // Delete-by-index counts date lines in this file. With `include` directives the
+  // file's date-line order no longer matches hledger's flattened tindex, so a
+  // delete could remove the wrong transaction. Refuse rather than risk it.
+  if (/^\s*include\s+/m.test(content)) {
+    throw createError({
+      statusCode: 422,
+      statusMessage: 'Cannot delete: the active journal uses include directives. The writable journal must be a single flat file.',
+    })
+  }
+
   const lines = content.split(/\r?\n/)
 
   // Parse journal to find transaction boundaries

@@ -8,10 +8,11 @@ import { deriveTransactionType } from './deriveTransactionType'
  *
  * - Expense: posting[0] = {category, +amount}, posting[1] = {sourceAccount, -amount}
  * - Income:  posting[0] = {destAccount, +amount}, posting[1] = {category, -amount}
- * - Transfer: posting[0] = {transferAccount, +amount}, posting[1] = {sourceAccount, -amount}
+ * - Transfer (out): posting[0] = {transferAccount, +amount}, posting[1] = {account, -amount}
+ * - Transfer (in):  posting[0] = {account, +amount}, posting[1] = {transferAccount, -amount}
  */
 export function toTransactionInput(input: SimplifiedTransactionInput): TransactionInput {
-  const { date, payee, account, type, category, transferAccount, amount, commodity = '$', status = '*' } = input
+  const { date, payee, account, type, category, transferAccount, direction = 'out', amount, commodity = '$', status = '*' } = input
 
   let postings
 
@@ -27,8 +28,15 @@ export function toTransactionInput(input: SimplifiedTransactionInput): Transacti
       { account: category!, amount: -amount, commodity },
     ]
   }
+  else if (direction === 'in') {
+    // transfer in — money enters the current account
+    postings = [
+      { account, amount, commodity },
+      { account: transferAccount!, amount: -amount, commodity },
+    ]
+  }
   else {
-    // transfer
+    // transfer out — money leaves the current account
     postings = [
       { account: transferAccount!, amount, commodity },
       { account, amount: -amount, commodity },
@@ -53,6 +61,9 @@ export function formStateToInput(state: SimplifiedFormState): SimplifiedTransact
     type,
     category: type !== 'transfer' ? state.category : undefined,
     transferAccount: type === 'transfer' ? state.transferAccount : undefined,
+    // For a transfer, the filled column decides direction relative to `account`:
+    // Inflow column → money in; Outflow column → money out.
+    direction: type === 'transfer' ? (state.inflow ? 'in' : 'out') : undefined,
     amount,
     status: state.status,
   }

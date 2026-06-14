@@ -1,5 +1,6 @@
 import type { BudgetCategory, BudgetCategoryGroup, BudgetEnvelopeReport } from '../../types/ui'
 import { stripAccountPrefix } from '../../utils/stripAccountPrefix'
+import { singleQuantity, MultiCommodityError } from '../../utils/singleQuantity'
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 
@@ -40,7 +41,7 @@ export default defineEventHandler(async (event) => {
 
   const activityMap = new Map<string, number>()
   for (const row of expenseReport.rows) {
-    activityMap.set(row.account, row.amounts?.[0]?.quantity ?? 0)
+    activityMap.set(row.account, singleQuantity(row.amounts, `expense activity for ${row.account}`))
   }
 
   // 3. Fetch budget sub-account data and real account totals
@@ -61,7 +62,7 @@ export default defineEventHandler(async (event) => {
     let totalAllBudgetSubAccounts = 0
     for (const row of cumulativeReport.rows) {
       const account = row.account as string
-      const balance = row.amounts?.[0]?.quantity ?? 0
+      const balance = singleQuantity(row.amounts, `budget balance for ${account}`)
 
       if (account.startsWith('assets:checking:budget:')) {
         totalAllBudgetSubAccounts += balance
@@ -87,11 +88,12 @@ export default defineEventHandler(async (event) => {
     const realBalArgs = ['bal', 'assets:', 'liabilities:']
     const realBalRaw = await hledgerExec(realBalArgs)
     const realBalReport = transformBalanceReport(realBalRaw)
-    const netRealBalance = realBalReport.totals?.[0]?.quantity ?? 0
+    const netRealBalance = singleQuantity(realBalReport.totals, 'net real account balance')
 
     // Subtract all envelope balances (including pending CC) from net real balance
+    const unallocatedRow = cumulativeReport.rows.find((r: any) => r.account === 'assets:checking:budget:unallocated')
     const envelopesAndPending = totalAllBudgetSubAccounts
-      - (cumulativeReport.rows.find((r: any) => r.account === 'assets:checking:budget:unallocated')?.amounts?.[0]?.quantity ?? 0)
+      - singleQuantity(unallocatedRow?.amounts, 'unallocated balance')
     readyToAssign = netRealBalance - envelopesAndPending
 
     // b) Period-scoped delta — net change in budget sub-accounts this period
@@ -102,7 +104,7 @@ export default defineEventHandler(async (event) => {
 
       for (const row of periodReport.rows) {
         const account = row.account as string
-        const delta = row.amounts?.[0]?.quantity ?? 0
+        const delta = singleQuantity(row.amounts, `budget period delta for ${account}`)
         if (account.startsWith('assets:checking:budget:')
           && account !== 'assets:checking:budget:unallocated'
           && !account.startsWith('assets:checking:budget:pending:')) {
@@ -111,7 +113,9 @@ export default defineEventHandler(async (event) => {
         }
       }
     }
-  } catch {
+  } catch (err) {
+    // A multi-commodity account is a real error — surface it, don't mask it as $0.
+    if (err instanceof MultiCommodityError) throw err
     // No budget sub-accounts yet — show $0 for everything (backward compatibility)
   }
 
@@ -128,16 +132,18 @@ export default defineEventHandler(async (event) => {
     // Available = cumulative running balance (includes rollover from all prior periods)
     const available = budgetBalanceMap.get(budgetKey) ?? 0
 
-    // Assigned = this period's assignment amount
-    // Budget sub-account period delta = assigned_this_period - spent_this_period
-    // So: assigned_this_period = delta + |activity_this_period|
+    // Assigned = assignment amount, reverse-derived from the budget sub-account.
+    // Identity: budgetDelta = assigned − spent, and spent = activity (signed:
+    // an outflow is negative, a refund positive). So assigned = delta + activity
+    // with SIGNED activity. Using |activity| would invent a phantom assignment
+    // for refunds (a $20 refund would read as +$40 assigned).
     let assigned: number
     if (period) {
       const periodDelta = budgetPeriodDeltaMap.get(budgetKey) ?? 0
-      assigned = periodDelta + Math.abs(activity)
+      assigned = periodDelta + activity
     } else {
-      // No period filter: show all-time assigned = available + |all-time activity|
-      assigned = available + Math.abs(activity)
+      // No period filter: all-time assigned = cumulative available + all-time activity.
+      assigned = available + activity
     }
 
     const category: BudgetCategory = {

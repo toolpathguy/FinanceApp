@@ -61,6 +61,13 @@ export interface SimplifiedTransactionInput {
   category?: string
   /** For transfers: the target account (e.g., "assets:savings") */
   transferAccount?: string
+  /**
+   * For transfers: which column the user filled, i.e. the direction of money
+   * relative to `account`. `'out'` = money leaves `account` (the default,
+   * Outflow column); `'in'` = money enters `account` (Inflow column).
+   * Ignored for expense/income.
+   */
+  direction?: 'in' | 'out'
   /** Positive number — direction determined by type + which column user entered */
   amount: number
   commodity?: string              // Defaults to "$"

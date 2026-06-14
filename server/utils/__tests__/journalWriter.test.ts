@@ -81,6 +81,30 @@ describe('validateTransaction()', () => {
     expect(errors.some(e => e.match(/sum to zero/i))).toBe(true)
   })
 
+  it('accepts amounts that balance exactly in cents (float-imprecise sum)', () => {
+    // 0.1 + 0.2 - 0.3 is not exactly 0 in binary float, but is 0 in cents.
+    const errors = validateTransaction({
+      ...validInput,
+      postings: [
+        { account: 'expenses:a', amount: 0.10 },
+        { account: 'expenses:b', amount: 0.20 },
+        { account: 'assets:checking', amount: -0.30 },
+      ],
+    })
+    expect(errors).toEqual([])
+  })
+
+  it('rejects a one-cent imbalance', () => {
+    const errors = validateTransaction({
+      ...validInput,
+      postings: [
+        { account: 'expenses:dining', amount: 5.00 },
+        { account: 'assets:checking', amount: -5.01 },
+      ],
+    })
+    expect(errors.some(e => e.match(/sum to zero/i))).toBe(true)
+  })
+
   it('returns error when more than one posting omits the amount', () => {
     const errors = validateTransaction({
       ...validInput,

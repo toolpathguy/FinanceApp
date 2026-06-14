@@ -62,6 +62,40 @@ describe('toTransactionInput', () => {
     expect(result.postings[0].amount! + result.postings[1].amount!).toBe(0)
   })
 
+  it('converts an outgoing transfer (direction "out") — money leaves the account', () => {
+    const input: SimplifiedTransactionInput = {
+      date: '2025-01-17',
+      payee: 'Transfer',
+      account: 'assets:checking',
+      type: 'transfer',
+      transferAccount: 'assets:savings',
+      direction: 'out',
+      amount: 500,
+    }
+
+    const result = toTransactionInput(input)
+    expect(result.postings[0]).toEqual({ account: 'assets:savings', amount: 500, commodity: '$' })
+    expect(result.postings[1]).toEqual({ account: 'assets:checking', amount: -500, commodity: '$' })
+    expect(result.postings[0].amount! + result.postings[1].amount!).toBe(0)
+  })
+
+  it('converts an incoming transfer (direction "in") — money enters the account', () => {
+    const input: SimplifiedTransactionInput = {
+      date: '2025-01-17',
+      payee: 'Transfer',
+      account: 'assets:checking',
+      type: 'transfer',
+      transferAccount: 'assets:savings',
+      direction: 'in',
+      amount: 500,
+    }
+
+    const result = toTransactionInput(input)
+    expect(result.postings[0]).toEqual({ account: 'assets:checking', amount: 500, commodity: '$' })
+    expect(result.postings[1]).toEqual({ account: 'assets:savings', amount: -500, commodity: '$' })
+    expect(result.postings[0].amount! + result.postings[1].amount!).toBe(0)
+  })
+
   it('uses provided commodity and status', () => {
     const input: SimplifiedTransactionInput = {
       date: '2025-01-15',
@@ -141,7 +175,7 @@ describe('formStateToInput', () => {
     expect(result.transferAccount).toBeUndefined()
   })
 
-  it('converts a transfer form state', () => {
+  it('converts an outgoing transfer form state (outflow filled → direction "out")', () => {
     const state: SimplifiedFormState = {
       date: '2025-01-17',
       payee: 'Transfer',
@@ -158,7 +192,32 @@ describe('formStateToInput', () => {
     expect(result.type).toBe('transfer')
     expect(result.amount).toBe(500)
     expect(result.transferAccount).toBe('assets:savings')
+    expect(result.direction).toBe('out')
     expect(result.category).toBeUndefined()
     expect(result.status).toBe('')
+  })
+
+  it('converts an incoming transfer form state (inflow filled → direction "in")', () => {
+    const state: SimplifiedFormState = {
+      date: '2025-01-17',
+      payee: 'Transfer',
+      account: 'assets:checking',
+      category: '',
+      transferAccount: 'assets:savings',
+      inflow: '500',
+      outflow: '',
+      status: '',
+    }
+
+    const result = formStateToInput(state)
+
+    expect(result.type).toBe('transfer')
+    expect(result.amount).toBe(500)
+    expect(result.direction).toBe('in')
+
+    // End-to-end: an incoming transfer credits the current account.
+    const tx = toTransactionInput(result)
+    expect(tx.postings[0]).toEqual({ account: 'assets:checking', amount: 500, commodity: '$' })
+    expect(tx.postings[1]).toEqual({ account: 'assets:savings', amount: -500, commodity: '$' })
   })
 })

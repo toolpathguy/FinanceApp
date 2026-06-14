@@ -118,11 +118,14 @@ describe('Migration: first assignment creates budget sub-accounts', () => {
       ]),
     )
 
-    // Verify physical account debit (no balance assertion for partial assignments)
-    const physicalPosting = txInput.postings.find((p: any) => p.account === 'assets:checking')
-    expect(physicalPosting).toBeDefined()
-    expect(physicalPosting.amount).toBe(-1500)
-    expect(physicalPosting.balanceAssertion).toBeUndefined()
+    // Verify the unallocated-pool debit (assign pulls from Ready-to-Assign, not
+    // bare checking; no balance assertion for partial assignments)
+    const balancingPosting = txInput.postings.find((p: any) => p.account === 'assets:checking:budget:unallocated')
+    expect(balancingPosting).toBeDefined()
+    expect(balancingPosting.amount).toBe(-1500)
+    expect(balancingPosting.balanceAssertion).toBeUndefined()
+    // Bare checking is untouched by an assignment.
+    expect(txInput.postings.find((p: any) => p.account === 'assets:checking')).toBeUndefined()
 
     // Verify transaction metadata
     expect(txInput.status).toBe('*')

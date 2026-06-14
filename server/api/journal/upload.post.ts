@@ -9,6 +9,15 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Content is required' })
   }
 
+  // The writable journal must be a single flat file: delete-by-index relies on
+  // file date-line order matching hledger's tindex, which `include` breaks.
+  if (/^\s*include\s+/m.test(body.content)) {
+    throw createError({
+      statusCode: 422,
+      statusMessage: 'Journals with include directives are not supported. Upload a single flat journal file.',
+    })
+  }
+
   let filePath: string
 
   if (body.filename && typeof body.filename === 'string' && body.filename.trim()) {

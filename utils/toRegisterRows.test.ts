@@ -221,4 +221,128 @@ describe('toRegisterRows', () => {
   it('returns empty array for empty transactions list', () => {
     expect(toRegisterRows([], 'assets:checking')).toEqual([])
   })
+
+  // ─── Family aggregation (envelope model, Issue #3 / R1) ───────────────────
+
+  it('aggregates an envelope-funded expense as a single outflow on the real account', () => {
+    // Rent: bare checking never moves; the budget envelope does.
+    const txs: HledgerTransaction[] = [
+      makeTx({
+        description: 'Rent',
+        postings: [
+          { account: 'expenses:housing:rent', amounts: [{ commodity: '$', quantity: 1200 }] },
+          { account: 'assets:checking:budget:housing:rent', amounts: [{ commodity: '$', quantity: -1200 }] },
+        ],
+      }),
+    ]
+
+    const rows = toRegisterRows(txs, 'assets:checking')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].outflow).toBe(1200)
+    expect(rows[0].inflow).toBeNull()
+    expect(rows[0].runningBalance).toBe(-1200)
+    expect(rows[0].categoryRaw).toBe('expenses:housing:rent')
+    expect(rows[0].isTransfer).toBe(false)
+  })
+
+  it('omits a budget assignment (checking → envelope nets to zero) from the real-account register', () => {
+    const txs: HledgerTransaction[] = [
+      makeTx({
+        description: 'Budget Assignment',
+        postings: [
+          { account: 'assets:checking:budget:food', amounts: [{ commodity: '$', quantity: 400 }] },
+          { account: 'assets:checking', amounts: [{ commodity: '$', quantity: -400 }] },
+        ],
+      }),
+    ]
+    expect(toRegisterRows(txs, 'assets:checking')).toHaveLength(0)
+  })
+
+  it('omits an envelope-to-envelope transfer from the real-account register', () => {
+    const txs: HledgerTransaction[] = [
+      makeTx({
+        description: 'Budget Transfer',
+        postings: [
+          { account: 'assets:checking:budget:food', amounts: [{ commodity: '$', quantity: 50 }] },
+          { account: 'assets:checking:budget:transport', amounts: [{ commodity: '$', quantity: -50 }] },
+        ],
+      }),
+    ]
+    expect(toRegisterRows(txs, 'assets:checking')).toHaveLength(0)
+  })
+
+  it('omits a credit-card expense (moves money between envelopes only) from the real-account register', () => {
+    const txs: HledgerTransaction[] = [
+      makeTx({
+        description: 'Restaurant',
+        postings: [
+          { account: 'expenses:food:restaurants', amounts: [{ commodity: '$', quantity: 45 }] },
+          { account: 'assets:checking:budget:food:restaurants', amounts: [{ commodity: '$', quantity: -45 }] },
+          { account: 'assets:checking:budget:pending:credit-card', amounts: [{ commodity: '$', quantity: 45 }] },
+          { account: 'liabilities:credit-card', amounts: [{ commodity: '$', quantity: -45 }] },
+        ],
+      }),
+    ]
+    // Net to the checking family = -45 + 45 = 0 → no real balance change.
+    expect(toRegisterRows(txs, 'assets:checking')).toHaveLength(0)
+  })
+
+  it('register running balance tracks the real bank balance across mixed activity', () => {
+    const txs: HledgerTransaction[] = [
+      makeTx({ index: 1, description: 'Salary', postings: [
+        { account: 'assets:checking', amounts: [{ commodity: '$', quantity: 2000 }] },
+        { account: 'income:salary', amounts: [{ commodity: '$', quantity: -2000 }] },
+      ] }),
+      makeTx({ index: 2, description: 'Budget Assignment', postings: [
+        { account: 'assets:checking:budget:food', amounts: [{ commodity: '$', quantity: 500 }] },
+        { account: 'assets:checking', amounts: [{ commodity: '$', quantity: -500 }] },
+      ] }),
+      makeTx({ index: 3, description: 'Rent', postings: [
+        { account: 'expenses:housing:rent', amounts: [{ commodity: '$', quantity: 1200 }] },
+        { account: 'assets:checking:budget:housing:rent', amounts: [{ commodity: '$', quantity: -1200 }] },
+      ] }),
+    ]
+
+    const rows = toRegisterRows(txs, 'assets:checking')
+    // Assignment (tx 2) is internal → dropped. Salary +2000, Rent -1200.
+    expect(rows).toHaveLength(2)
+    expect(rows[0].runningBalance).toBe(2000)
+    expect(rows[1].runningBalance).toBe(800)
+  })
+
+  it('shows envelope-level activity when viewing a budget sub-account directly (R1.5)', () => {
+    const txs: HledgerTransaction[] = [
+      makeTx({ index: 1, description: 'Budget Assignment', postings: [
+        { account: 'assets:checking:budget:food', amounts: [{ commodity: '$', quantity: 400 }] },
+        { account: 'assets:checking', amounts: [{ commodity: '$', quantity: -400 }] },
+      ] }),
+      makeTx({ index: 2, description: 'Grocery Store', postings: [
+        { account: 'expenses:food', amounts: [{ commodity: '$', quantity: 60 }] },
+        { account: 'assets:checking:budget:food', amounts: [{ commodity: '$', quantity: -60 }] },
+      ] }),
+    ]
+
+    const rows = toRegisterRows(txs, 'assets:checking:budget:food')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].inflow).toBe(400)   // funded from checking
+    expect(rows[1].outflow).toBe(60)   // spent on groceries
+    expect(rows[1].runningBalance).toBe(340)
+  })
+
+  it('flags a multi-commodity family posting instead of silently dropping a commodity (R6.3)', () => {
+    const txs: HledgerTransaction[] = [
+      makeTx({
+        description: 'FX deposit',
+        postings: [
+          { account: 'assets:checking', amounts: [{ commodity: '$', quantity: 100 }, { commodity: '€', quantity: 50 }] },
+          { account: 'income:misc', amounts: [{ commodity: '$', quantity: -100 }] },
+        ],
+      }),
+    ]
+
+    const [row] = toRegisterRows(txs, 'assets:checking')
+    expect(row.category).toBe('Multiple currencies')
+    expect(row.inflow).toBeNull()
+    expect(row.outflow).toBeNull()
+  })
 })

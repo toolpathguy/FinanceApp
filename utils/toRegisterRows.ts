@@ -3,12 +3,28 @@ import type { RegisterRow } from '~/types/ui'
 import { stripAccountPrefix } from './stripAccountPrefix'
 
 /**
- * Converts raw hledger transactions into YNAB-style register rows
- * for a given account.
+ * Returns true if `account` belongs to the register's account *family*:
+ * the requested account itself or any of its sub-accounts.
  *
- * For each transaction, finds the posting matching `accountPath`,
- * derives payee/category/inflow/outflow from the "other" posting,
- * and computes a running balance as a cumulative sum.
+ * For a real account this includes its envelope layer
+ * (`assets:checking` + `assets:checking:budget:*`); for a budget envelope it is
+ * scoped to that envelope's own sub-tree.
+ */
+function isFamilyPosting(account: string, accountPath: string): boolean {
+  return account === accountPath || account.startsWith(accountPath + ':')
+}
+
+/**
+ * Converts raw hledger transactions into YNAB-style register rows for an account.
+ *
+ * The register reflects the *real balance* of the account family
+ * (`accountPath` + its sub-accounts). For each transaction we sum the net change
+ * across the family; that net is the row's inflow/outflow and the running
+ * balance tracks the family balance. Transactions whose net family change is
+ * zero — budget assignments (checking→envelope), envelope transfers, credit-card
+ * expenses that only move money between envelopes — are internal to the account
+ * and omitted. Category/payee are derived from the postings *outside* the family
+ * (the expense/income/other-account leg).
  */
 export function toRegisterRows(
   transactions: HledgerTransaction[],
@@ -18,26 +34,41 @@ export function toRegisterRows(
   const rows: RegisterRow[] = []
 
   for (const tx of transactions) {
-    // Find the posting that matches the current account (exact or sub-account)
-    const thisPosting = tx.postings.find(
-      p => p.account === accountPath || p.account.startsWith(accountPath + ':'),
-    )
-    if (!thisPosting || !thisPosting.amounts[0]) continue
+    const familyPostings = tx.postings.filter(p => isFamilyPosting(p.account, accountPath))
+    if (familyPostings.length === 0) continue
 
-    const amount = thisPosting.amounts[0].quantity
+    // A family posting holding 2+ commodities can't be netted to a single
+    // number — surface a clearly-marked row rather than silently using the
+    // first commodity. (Single-commodity `$` is the norm in this app.)
+    if (familyPostings.some(p => p.amounts.length > 1)) {
+      rows.push({
+        date: tx.date,
+        payee: tx.description,
+        category: 'Multiple currencies',
+        categoryRaw: '',
+        inflow: null,
+        outflow: null,
+        runningBalance, // carried forward — cannot aggregate across commodities
+        isTransfer: false,
+        transactionIndex: tx.index,
+        status: tx.status,
+      })
+      continue
+    }
 
-    // Determine inflow vs outflow from sign
-    const inflow = amount > 0 ? amount : null
-    const outflow = amount < 0 ? Math.abs(amount) : null
+    const net = familyPostings.reduce((sum, p) => sum + (p.amounts[0]?.quantity ?? 0), 0)
 
-    // Update running balance
-    runningBalance += amount
+    // Internal move (nets to zero in the family) — not real account activity.
+    if (Math.round(net * 100) === 0) continue
 
-    // Handle legacy transactions with >2 postings
-    const otherPostings = tx.postings.filter(p => p !== thisPosting)
-    const isSplit = otherPostings.length > 1
+    const inflow = net > 0 ? net : null
+    const outflow = net < 0 ? Math.abs(net) : null
+    runningBalance += net
 
-    if (isSplit) {
+    // Derive category/payee from the postings outside the family.
+    const otherPostings = tx.postings.filter(p => !isFamilyPosting(p.account, accountPath))
+
+    if (otherPostings.length > 1) {
       rows.push({
         date: tx.date,
         payee: tx.description,
@@ -53,13 +84,8 @@ export function toRegisterRows(
       continue
     }
 
-    // Standard 2-posting transaction
-    const otherPosting = otherPostings[0]
-    const otherAccount = otherPosting?.account ?? ''
-
+    const otherAccount = otherPostings[0]?.account ?? ''
     const isTransfer = otherAccount.startsWith('assets:') || otherAccount.startsWith('liabilities:')
-
-    // Derive display category and payee
     const category = isTransfer ? '' : stripAccountPrefix(otherAccount)
     const payee = isTransfer
       ? `Transfer: ${stripAccountPrefix(otherAccount)}`

@@ -124,6 +124,50 @@ describe('P7: Posting amounts always balance', () => {
 })
 
 /**
+ * Property P7b: Cents-balanced postings always format to a balanced journal.
+ * For any posting set whose amounts sum to zero in integer cents — including
+ * sub-cent values that don't sum to zero in binary float — formatTransaction()
+ * produces written amounts that sum to exactly zero.
+ *
+ * **Validates: Requirement R5.3**
+ */
+describe('P7b: cents-balanced postings format to a balanced journal', () => {
+  it('written amounts sum to exactly zero when input balances in cents', () => {
+    fc.assert(
+      fc.property(
+        fc.array(arbAccountName(), { minLength: 2, maxLength: 6 })
+          .filter((accs) => new Set(accs).size === accs.length),
+        fc.array(fc.integer({ min: -100000, max: 100000 }), { minLength: 1, maxLength: 5 }),
+        (accounts, leadCents) => {
+          fc.pre(leadCents.length <= accounts.length - 1)
+          // Balancing posting cancels the rest exactly in cents.
+          const sumLead = leadCents.reduce((a, b) => a + b, 0)
+          const allCents = [...leadCents, -sumLead]
+          const postings = allCents.map((cents, i) => ({
+            account: accounts[i]!,
+            amount: cents / 100,
+          }))
+          const input: TransactionInput = { date: '2025-01-15', description: 'Balanced', postings }
+
+          // Validator agrees it is balanced.
+          expect(validateTransaction(input)).toEqual([])
+
+          const output = formatTransaction(input)
+          const written = output
+            .split('\n')
+            .filter((l) => l.startsWith('    '))
+            .map((l) => l.split('  = ')[0]!.match(/\$(-?\d+\.\d{2})/))
+            .filter((m): m is RegExpMatchArray => m !== null)
+            .map((m) => Math.round(parseFloat(m[1]!) * 100))
+          expect(written.reduce((a, b) => a + b, 0)).toBe(0)
+        }
+      ),
+      { numRuns: 300 }
+    )
+  })
+})
+
+/**
  * Property P6: Formatted transactions are parseable by hledger
  * For any valid TransactionInput, formatTransaction() output is valid hledger journal syntax.
  *

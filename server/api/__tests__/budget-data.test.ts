@@ -227,6 +227,74 @@ describe('GET /api/budget', () => {
     expect(result.totalAvailable).toBe(0)
   })
 
+  it('does not invent a phantom Assigned for a refund (negative activity)', async () => {
+    // A $20 refund with no assignment this period: the expense account balance
+    // goes -20 (activity), and the budget envelope is credited +20 (period delta).
+    // Correct Assigned = delta + activity = 20 + (-20) = 0, NOT 20 + |−20| = 40.
+    mockGetQuery.mockReturnValue({ period: '2025-03' })
+    mockHledgerExecText.mockResolvedValue('expenses:food:groceries\n')
+
+    mockHledgerExec
+      .mockResolvedValueOnce({}) // period expense activity
+      .mockResolvedValueOnce({}) // cumulative budget
+      .mockResolvedValueOnce({}) // real account totals
+      .mockResolvedValueOnce({}) // period budget delta
+
+    mockTransformBalanceReport
+      // 1st: period expense activity = -$20 (refund)
+      .mockReturnValueOnce({
+        rows: [{ account: 'expenses:food:groceries', amounts: [{ commodity: '$', quantity: -20 }] }],
+        totals: [{ commodity: '$', quantity: -20 }],
+      })
+      // 2nd: cumulative budget
+      .mockReturnValueOnce({
+        rows: [
+          { account: 'assets:checking:budget:food:groceries', amounts: [{ commodity: '$', quantity: 20 }] },
+          { account: 'assets:checking:budget:unallocated', amounts: [{ commodity: '$', quantity: 0 }] },
+        ],
+        totals: [{ commodity: '$', quantity: 20 }],
+      })
+      // 3rd: real account totals
+      .mockReturnValueOnce({
+        rows: [{ account: 'assets:checking', amounts: [{ commodity: '$', quantity: 20 }] }],
+        totals: [{ commodity: '$', quantity: 20 }],
+      })
+      // 4th: period delta = +$20 (refund credited the envelope, no assignment)
+      .mockReturnValueOnce({
+        rows: [{ account: 'assets:checking:budget:food:groceries', amounts: [{ commodity: '$', quantity: 20 }] }],
+        totals: [{ commodity: '$', quantity: 20 }],
+      })
+
+    const result = await getBudget(fakeEvent)
+    const groceries = result.categoryGroups
+      .find((g: any) => g.name === 'Food')!
+      .categories.find((c: any) => c.accountPath === 'expenses:food:groceries')!
+
+    expect(groceries.activity).toBe(-20)
+    expect(groceries.assigned).toBe(0)
+  })
+
+  it('throws (does not silently drop) when an expense account holds two commodities', async () => {
+    mockGetQuery.mockReturnValue({})
+    mockHledgerExecText.mockResolvedValue('expenses:food:groceries\n')
+    mockHledgerExec.mockResolvedValueOnce({}) // expense activity
+
+    mockTransformBalanceReport.mockReturnValueOnce({
+      rows: [
+        {
+          account: 'expenses:food:groceries',
+          amounts: [
+            { commodity: '$', quantity: 50 },
+            { commodity: '€', quantity: 10 },
+          ],
+        },
+      ],
+      totals: [],
+    })
+
+    await expect(getBudget(fakeEvent)).rejects.toThrow(/multiple commodities/i)
+  })
+
   it('includes savings and credit card in Ready to Assign (YNAB Rule 1)', async () => {
     mockGetQuery.mockReturnValue({})
 

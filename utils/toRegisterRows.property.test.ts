@@ -171,4 +171,59 @@ describe('toRegisterRows — Property Tests', () => {
       }),
     )
   })
+
+  /**
+   * Property 7: Final running balance equals the family net (Issue #3 / R1.3)
+   *
+   * For any mix of transactions — including budget-envelope postings under the
+   * account and internal moves that net to zero — the last row's runningBalance
+   * equals the sum of every family posting across all transactions (the real
+   * account balance). Internal-only transactions contribute zero and are omitted.
+   */
+  it('Property 7: final runningBalance equals the sum of all family postings', () => {
+    const arbFamilyAccount = fc.oneof(
+      fc.constant(testAccount),
+      arbSegment.map(s => `${testAccount}:budget:${s}`),
+      fc.constant(`${testAccount}:budget:unallocated`),
+    )
+
+    // A balanced 2-posting tx: one leg in the family, one outside (or a second
+    // family leg, producing an internal move that must net out).
+    const arbTx = fc
+      .tuple(arbDate, arbStatus, arbAmount, arbFamilyAccount,
+        fc.oneof(arbFamilyAccount, arbCategoryAccount, arbRealAccount), fc.nat({ max: 9999 }))
+      .map(([date, status, amount, famAcct, otherAcct, index]) => {
+        const sign = index % 2 === 0 ? 1 : -1
+        return {
+          date,
+          description: 'tx',
+          status,
+          index,
+          postings: [
+            { account: famAcct, amounts: [{ commodity: '$', quantity: sign * amount }] },
+            { account: otherAcct, amounts: [{ commodity: '$', quantity: -sign * amount }] },
+          ],
+        } as HledgerTransaction
+      })
+      .filter(tx => tx.postings[0]!.account !== tx.postings[1]!.account)
+
+    fc.assert(
+      fc.property(fc.array(arbTx, { minLength: 1, maxLength: 25 }), (txs) => {
+        const rows = toRegisterRows(txs, testAccount)
+
+        // Expected family balance = sum of every posting in the family.
+        let expected = 0
+        for (const tx of txs) {
+          for (const p of tx.postings) {
+            if (p.account === testAccount || p.account.startsWith(testAccount + ':')) {
+              expected += p.amounts[0]!.quantity
+            }
+          }
+        }
+
+        const finalBalance = rows.length > 0 ? rows[rows.length - 1]!.runningBalance : 0
+        expect(finalBalance).toBeCloseTo(expected, 6)
+      }),
+    )
+  })
 })

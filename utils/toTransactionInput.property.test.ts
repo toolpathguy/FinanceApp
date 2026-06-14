@@ -140,6 +140,36 @@ describe('toTransactionInput — Property Tests', () => {
   })
 
   /**
+   * Property 2b: Transfer legs are oriented by direction and always balance.
+   * (Issue #3 / R3.2, R3.3, R3.5)
+   *
+   * direction 'out' → account is debited (−amount); 'in' → account is credited
+   * (+amount). Either way the two legs sum to zero.
+   */
+  it('Property 2b: transfer direction orients the legs; both directions balance', () => {
+    const arbDirectedTransfer = fc
+      .tuple(arbTransferInput, fc.constantFrom('in' as const, 'out' as const))
+      .map(([input, direction]) => ({ ...input, direction }))
+
+    fc.assert(
+      fc.property(arbDirectedTransfer, (input) => {
+        const result = toTransactionInput(input)
+
+        // Always balanced.
+        expect(result.postings[0].amount! + result.postings[1].amount!).toBe(0)
+
+        // The current account's signed amount matches the direction.
+        const accountPosting = result.postings.find(p => p.account === input.account)!
+        if (input.direction === 'in') {
+          expect(accountPosting.amount).toBeGreaterThan(0)
+        } else {
+          expect(accountPosting.amount).toBeLessThan(0)
+        }
+      }),
+    )
+  })
+
+  /**
    * Property 3: Transaction conversion preserves date and payee
    *
    * For any valid SimplifiedTransactionInput, the TransactionInput returned should have

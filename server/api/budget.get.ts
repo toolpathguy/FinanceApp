@@ -1,6 +1,7 @@
 import type { BudgetCategory, BudgetCategoryGroup, BudgetEnvelopeReport } from '../../types/ui'
 import { stripAccountPrefix } from '../../utils/stripAccountPrefix'
 import { singleQuantity, MultiCommodityError } from '../../utils/singleQuantity'
+import { isValidPeriod } from '../utils/hledgerArgs'
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 
@@ -27,6 +28,13 @@ function expenseToBudgetKey(expenseAccount: string): string {
 export default defineEventHandler(async (event) => {
   const { period } = getQuery(event)
 
+  // Empty/whitespace is treated as absent (R4.5); a present period is validated
+  // before reaching hledger to prevent flag injection (Issue #2, R4.4).
+  const pd = period ? String(period).trim() : ''
+  if (pd && !isValidPeriod(pd)) {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid period expression' })
+  }
+
   // 1. Fetch ALL expense accounts, filter out hidden ones
   const allAccountsRaw = await hledgerExecText(['accounts'])
   const allAccounts = allAccountsRaw.trim().split(/\r?\n/).filter(Boolean).map(s => s.trim())
@@ -35,7 +43,7 @@ export default defineEventHandler(async (event) => {
 
   // 2. Fetch period-filtered expense activity (Activity column)
   const expenseArgs = ['bal', 'expenses:']
-  if (period) expenseArgs.push('-p', String(period))
+  if (pd) expenseArgs.push('-p', pd)
   const expenseRaw = await hledgerExec(expenseArgs)
   const expenseReport = transformBalanceReport(expenseRaw)
 
@@ -97,8 +105,8 @@ export default defineEventHandler(async (event) => {
     readyToAssign = netRealBalance - envelopesAndPending
 
     // b) Period-scoped delta — net change in budget sub-accounts this period
-    if (period) {
-      const periodArgs = ['bal', 'assets:checking:budget:', '-p', String(period)]
+    if (pd) {
+      const periodArgs = ['bal', 'assets:checking:budget:', '-p', pd]
       const periodRaw = await hledgerExec(periodArgs)
       const periodReport = transformBalanceReport(periodRaw)
 
@@ -138,7 +146,7 @@ export default defineEventHandler(async (event) => {
     // with SIGNED activity. Using |activity| would invent a phantom assignment
     // for refunds (a $20 refund would read as +$40 assigned).
     let assigned: number
-    if (period) {
+    if (pd) {
       const periodDelta = budgetPeriodDeltaMap.get(budgetKey) ?? 0
       assigned = periodDelta + activity
     } else {
@@ -184,7 +192,7 @@ export default defineEventHandler(async (event) => {
   const totalAvailable = categoryGroups.reduce((s, g) => s + g.available, 0)
 
   return {
-    period: period ? String(period) : '',
+    period: pd,
     readyToAssign,
     categoryGroups,
     totalAssigned,

@@ -1,9 +1,19 @@
 import { spawn } from 'node:child_process'
 import type { TransactionInput } from '../../types/api'
+import { readActiveJournalPath, SAMPLE_JOURNAL } from './activeJournal'
 
-/** Resolve journal path from env, with Docker default fallback */
+// Re-exported so existing importers of these from hledger.ts keep working.
+export { SAMPLE_JOURNAL, ACTIVE_JOURNAL_CONFIG } from './activeJournal'
+
+/**
+ * Resolve the active journal path.
+ *
+ * Precedence (Issue #2, R3.4): persisted config → LEDGER_FILE env → sample.
+ * Reading config from disk (rather than process.env) avoids a cross-request
+ * race and survives restart. A missing/corrupt config falls back silently.
+ */
 export function resolveJournalPath(): string {
-  return process.env.LEDGER_FILE || 'test-data/sample.journal'
+  return readActiveJournalPath() || process.env.LEDGER_FILE || SAMPLE_JOURNAL
 }
 
 /** Run an hledger command and return parsed JSON */

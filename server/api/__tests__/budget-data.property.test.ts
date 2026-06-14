@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fc from 'fast-check'
+import { resolveBudgetBase } from '../../utils/hledger'
 
 // --- Mock Nitro globals ---
 
@@ -13,9 +14,12 @@ vi.stubGlobal('getQuery', mockGetQuery)
 vi.stubGlobal('hledgerExec', mockHledgerExec)
 vi.stubGlobal('hledgerExecText', mockHledgerExecText)
 vi.stubGlobal('transformBalanceReport', mockTransformBalanceReport)
+vi.stubGlobal('resolveBudgetBase', resolveBudgetBase)
 
-vi.mock('node:fs', () => ({ existsSync: () => false }))
-vi.mock('node:fs/promises', () => ({ readFile: vi.fn() }))
+vi.mock('node:fs/promises', () => ({
+  readFile: vi.fn(),
+  access: () => Promise.reject(new Error('no hidden-envelopes file')),
+}))
 
 const { default: getBudget } = await import('../budget.get')
 const fakeEvent = {} as any

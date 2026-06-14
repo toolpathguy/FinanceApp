@@ -64,8 +64,15 @@ rejected on delete and upload**, since they break the date-line ↔ tindex mappi
 ## Server utils (`server/utils/`, Nitro auto-imported)
 - `hledger.ts` — `resolveJournalPath` (precedence: `config/active-journal.json`
   → `LEDGER_FILE` → `test-data/sample.journal`), `hledgerExec`, `hledgerExecText`,
-  `transformTransactions`, `transformBalanceReport`, `addTransaction` (legacy).
+  `transformTransactions`, `transformBalanceReport`, `addTransaction` (legacy),
+  `resolveBudgetBase`/`DEFAULT_BUDGET_BASE` (derive the asset account hosting the
+  `:budget:` tree, Issue #4). All hledger spawning goes through a private
+  `runHledger` helper: rejects on spawn `error`/timeout (`HLEDGER_TIMEOUT_MS`,
+  default 30s) so a missing/hung hledger never hangs the request; binary
+  overridable via `HLEDGER_BIN`; stdout collected with `Buffer.concat`.
   Re-exports `SAMPLE_JOURNAL`/`ACTIVE_JOURNAL_CONFIG`. Guard-tested to never import `fs`.
+- `fsExists.ts` — `pathExists` (async `fs.access` wrapper; replaces `existsSync`
+  in request handlers, Issue #4).
 - `activeJournal.ts` — owns reading `config/active-journal.json` (`readActiveJournalPath`)
   + the `SAMPLE_JOURNAL`/`ACTIVE_JOURNAL_CONFIG` constants (kept out of `hledger.ts`).
 - `journalWriter.ts` — `validateTransaction`, `formatTransaction`, `appendTransaction`,
@@ -80,7 +87,8 @@ rejected on delete and upload**, since they break the date-line ↔ tindex mappi
 (`filterRealAccounts`/`filterCategoryAccounts`), `deriveTransactionType`,
 `validateSimplifiedForm`, `toTransactionInput` (transfers honor a `direction`
 field — inflow vs outflow column), `toRegisterRows` (family-aggregated; flags
-multi-commodity rows), `budgetAccounts` (`toBudgetSubAccount`/`isBudgetSubAccount`/
+multi-commodity rows; optional `openingBalance` seed for date-filtered registers,
+Issue #4), `budgetAccounts` (`toBudgetSubAccount`/`isBudgetSubAccount`/
 `toUnallocatedAccount`/…), `singleQuantity` (`MultiCommodityError` guard against
 silently dropping commodities), `validateTransactionForm` (legacy).
 
@@ -108,6 +116,11 @@ RegisterRow, BudgetCategory/Group, BudgetEnvelopeReport, RealAccount, AccountTre
   via `hledgerArgs` and account queries are passed after a `--` separator.
 - **Active journal** is persisted to `config/active-journal.json` (gitignored),
   not `process.env` — set by `journal/activate.post`, read by `resolveJournalPath`.
+- **Robustness (Issue #4):** hledger spawns time out / reject (never hang) via
+  `runHledger`; simplified `POST /api/transactions` rejects non-positive/non-finite
+  amounts; the budget base is **derived** (`resolveBudgetBase`), not hardcoded
+  `assets:checking`; date-filtered registers seed the opening balance from
+  `bal -e <startDate>`. `HLEDGER_BIN`/`HLEDGER_TIMEOUT_MS` env overrides exist.
 
 ## Tests
 Beside source: `*.test.ts` (unit), `*.property.test.ts` (fast-check). API tests

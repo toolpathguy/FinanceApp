@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { resolveBudgetBase } from '../../utils/hledger'
 
 // --- Mock Nitro globals ---
 
@@ -12,13 +13,14 @@ vi.stubGlobal('getQuery', mockGetQuery)
 vi.stubGlobal('hledgerExec', mockHledgerExec)
 vi.stubGlobal('hledgerExecText', mockHledgerExecText)
 vi.stubGlobal('transformBalanceReport', mockTransformBalanceReport)
+// Real implementation: pure when given the account list budget.get.ts passes,
+// so it derives the base from the mocked accounts (Issue #4 item 3).
+vi.stubGlobal('resolveBudgetBase', resolveBudgetBase)
 
-// Mock node:fs modules used by loadHiddenEnvelopes
-vi.mock('node:fs', () => ({
-  existsSync: () => false,
-}))
+// Mock fs used by loadHiddenEnvelopes / pathExists — no hidden-envelopes file.
 vi.mock('node:fs/promises', () => ({
   readFile: vi.fn(),
+  access: () => Promise.reject(new Error('no hidden-envelopes file')),
 }))
 
 const { default: getBudget } = await import('../budget.get')
@@ -334,5 +336,51 @@ describe('GET /api/budget', () => {
     // This includes savings ($1000) and accounts for CC debt (-$50)
     expect(result.readyToAssign).toBe(1150)
     expect(result.totalAvailable).toBe(300)
+  })
+
+  it('derives the budget base from a non-default primary account (Issue #4 item 3)', async () => {
+    mockGetQuery.mockReturnValue({})
+
+    // Primary account is assets:bank:everyday, not assets:checking. The accounts
+    // list includes its budget sub-tree, so resolveBudgetBase derives that base.
+    mockHledgerExecText.mockResolvedValue(
+      'assets:bank:everyday\nassets:bank:everyday:budget:food:groceries\n'
+      + 'assets:bank:everyday:budget:unallocated\nexpenses:food:groceries\n',
+    )
+
+    mockHledgerExec
+      .mockResolvedValueOnce({}) // expense activity
+      .mockResolvedValueOnce({}) // cumulative budget
+      .mockResolvedValueOnce({}) // real account totals
+
+    mockTransformBalanceReport
+      .mockReturnValueOnce({
+        rows: [{ account: 'expenses:food:groceries', amounts: [{ commodity: '$', quantity: 60 }] }],
+        totals: [{ commodity: '$', quantity: 60 }],
+      })
+      // cumulative budget — keyed under the non-default base
+      .mockReturnValueOnce({
+        rows: [
+          { account: 'assets:bank:everyday:budget:food:groceries', amounts: [{ commodity: '$', quantity: 240 }] },
+          { account: 'assets:bank:everyday:budget:unallocated', amounts: [{ commodity: '$', quantity: 100 }] },
+        ],
+        totals: [{ commodity: '$', quantity: 340 }],
+      })
+      .mockReturnValueOnce({
+        rows: [{ account: 'assets:bank:everyday', amounts: [{ commodity: '$', quantity: 340 }] }],
+        totals: [{ commodity: '$', quantity: 340 }],
+      })
+
+    const result = await getBudget(fakeEvent)
+
+    // The cumulative budget query must target the derived base, not assets:checking.
+    expect(mockHledgerExec).toHaveBeenNthCalledWith(2, ['bal', 'assets:bank:everyday:budget:'])
+
+    // Envelope balance is read off the derived base; RTA = 340 - 240 = 100.
+    const groceries = result.categoryGroups
+      .find((g: any) => g.name === 'Food')!
+      .categories.find((c: any) => c.accountPath === 'expenses:food:groceries')!
+    expect(groceries.available).toBe(240)
+    expect(result.readyToAssign).toBe(100)
   })
 })

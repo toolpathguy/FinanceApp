@@ -30,7 +30,17 @@ export default defineEventHandler(async (event) => {
   const transactions = transformTransactions(raw as any[])
 
   if (acct) {
-    return toRegisterRows(transactions, acct)
+    // Seed the running balance with the account family's opening balance for the
+    // window (Issue #4 item 4). `hledger bal -e <startDate>` is exclusive, so it
+    // totals every posting strictly before startDate — the true opening balance.
+    // Without this, a date-filtered register's Balance column resets to $0.
+    let openingBalance = 0
+    if (sd) {
+      const openingRaw = await hledgerExec(['bal', '-e', sd, '--', acct])
+      const openingReport = transformBalanceReport(openingRaw)
+      openingBalance = openingReport.totals?.[0]?.quantity ?? 0
+    }
+    return toRegisterRows(transactions, acct, openingBalance)
   }
 
   return transactions

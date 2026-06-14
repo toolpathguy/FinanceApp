@@ -98,6 +98,44 @@ describe('toRegisterRows', () => {
     expect(rows[2].runningBalance).toBe(1945)
   })
 
+  // Issue #4 item 4: a date-filtered register seeds the running balance with the
+  // window's opening balance instead of resetting to $0.
+  it('seeds the running balance from openingBalance', () => {
+    const txs: HledgerTransaction[] = [
+      makeTx({
+        index: 1,
+        postings: [
+          { account: 'assets:checking', amounts: [{ commodity: '$', quantity: -5 }] },
+          { account: 'expenses:dining', amounts: [{ commodity: '$', quantity: 5 }] },
+        ],
+      }),
+      makeTx({
+        index: 2,
+        postings: [
+          { account: 'assets:checking', amounts: [{ commodity: '$', quantity: 2000 }] },
+          { account: 'income:salary', amounts: [{ commodity: '$', quantity: -2000 }] },
+        ],
+      }),
+    ]
+
+    const rows = toRegisterRows(txs, 'assets:checking', 1000)
+    // Every row is offset by the $1000 opening balance vs. the unseeded case.
+    expect(rows[0]!.runningBalance).toBe(995)
+    expect(rows[1]!.runningBalance).toBe(2995)
+  })
+
+  it('defaults openingBalance to 0 (unchanged behavior)', () => {
+    const txs: HledgerTransaction[] = [
+      makeTx({
+        postings: [
+          { account: 'assets:checking', amounts: [{ commodity: '$', quantity: -5 }] },
+          { account: 'expenses:dining', amounts: [{ commodity: '$', quantity: 5 }] },
+        ],
+      }),
+    ]
+    expect(toRegisterRows(txs, 'assets:checking')[0]!.runningBalance).toBe(-5)
+  })
+
   it('detects transfers when other posting is assets/liabilities', () => {
     const txs: HledgerTransaction[] = [
       makeTx({

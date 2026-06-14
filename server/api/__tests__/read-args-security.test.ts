@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { resolveBudgetBase } from '../../utils/hledger'
 
 // Issue #2, R4: read routes validate query params before spawning hledger and
 // pass account queries after a `--` separator.
@@ -13,6 +14,7 @@ vi.stubGlobal('hledgerExec', mockHledgerExec)
 vi.stubGlobal('hledgerExecText', mockHledgerExecText)
 vi.stubGlobal('transformTransactions', (raw: any[]) => raw)
 vi.stubGlobal('transformBalanceReport', () => ({ rows: [], totals: [] }))
+vi.stubGlobal('resolveBudgetBase', resolveBudgetBase)
 vi.stubGlobal('createError', (opts: { statusCode: number; statusMessage?: string; message?: string }) => {
   const err = new Error(opts.statusMessage ?? opts.message) as any
   err.statusCode = opts.statusCode

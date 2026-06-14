@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { writeFile, readFile as fsReadFile, mkdir, rm, appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { resolveBudgetBase } from '../../utils/hledger'
 
 // --- Mock Nitro globals ---
 
@@ -24,6 +25,7 @@ vi.stubGlobal('createError', (opts: { statusCode: number; message: string }) => 
 vi.stubGlobal('hledgerExec', mockHledgerExec)
 vi.stubGlobal('hledgerExecText', mockHledgerExecText)
 vi.stubGlobal('transformBalanceReport', mockTransformBalanceReport)
+vi.stubGlobal('resolveBudgetBase', resolveBudgetBase)
 
 vi.mock('node:fs', () => ({ existsSync: () => false }))
 vi.mock('node:fs/promises', async (importOriginal) => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import fc from 'fast-check'
-import { resolveJournalPath, addTransaction, hledgerExec, transformTransactions, transformBalanceReport } from '../hledger'
+import { resolveJournalPath, addTransaction, hledgerExec, hledgerExecText, resolveBudgetBase, DEFAULT_BUDGET_BASE, transformTransactions, transformBalanceReport } from '../hledger'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
@@ -100,6 +100,90 @@ describe('amount transform precision', () => {
       [],
     ])
     expect(report.rows[0].amounts[0].quantity).toBe(9999999.99)
+  })
+})
+
+/**
+ * Issue #4 item 1: hledger process never hangs the request.
+ * A spawn failure (ENOENT) must REJECT, not leave the promise unsettled.
+ * We force the failure deterministically via HLEDGER_BIN → a missing binary,
+ * so this runs regardless of whether real hledger is installed.
+ */
+describe('runHledger process lifecycle (Issue #4 item 1)', () => {
+  const originalBin = process.env.HLEDGER_BIN
+  const originalTimeout = process.env.HLEDGER_TIMEOUT_MS
+
+  afterEach(() => {
+    if (originalBin !== undefined) process.env.HLEDGER_BIN = originalBin
+    else delete process.env.HLEDGER_BIN
+    if (originalTimeout !== undefined) process.env.HLEDGER_TIMEOUT_MS = originalTimeout
+    else delete process.env.HLEDGER_TIMEOUT_MS
+  })
+
+  it('R1.1: rejects (does not hang) when the binary cannot be spawned', async () => {
+    process.env.HLEDGER_BIN = 'hledger-does-not-exist-xyzzy'
+    await expect(hledgerExec(['print'])).rejects.toThrow(/could not be started/)
+  })
+
+  it('R1.1: hledgerExecText also rejects on spawn failure', async () => {
+    process.env.HLEDGER_BIN = 'hledger-does-not-exist-xyzzy'
+    await expect(hledgerExecText(['accounts'])).rejects.toThrow(/could not be started/)
+  })
+
+  it('R1.2: kills and rejects with a timeout error when the process runs too long', async () => {
+    if (!hledgerAvailable) return // needs a real process that takes >1ms to run
+    process.env.HLEDGER_TIMEOUT_MS = '1'
+    await expect(hledgerExec(['print'])).rejects.toThrow(/timed out/)
+  })
+})
+
+/**
+ * Issue #4 item 5a: stdout must not be accumulated via `string += Buffer`,
+ * which corrupts multi-byte UTF-8 sequences split across chunk boundaries.
+ */
+describe('buffer-safe output (Issue #4 item 5a)', () => {
+  const sourceCode = fs.readFileSync(path.join(__dirname, '..', 'hledger.ts'), 'utf-8')
+
+  it('no `stdout +=` / `+= c` chunk concatenation remains', () => {
+    expect(sourceCode).not.toMatch(/stdout\s*\+=/)
+    expect(sourceCode).not.toMatch(/stderr\s*\+=/)
+    expect(sourceCode).toContain('Buffer.concat')
+  })
+})
+
+/**
+ * Issue #4 item 3: derive the budget base from the journal rather than
+ * hardcoding `assets:checking`. Passing an explicit account list keeps these
+ * cases pure (no hledger spawn).
+ */
+describe('resolveBudgetBase (Issue #4 item 3)', () => {
+  it('returns DEFAULT_BUDGET_BASE when no asset account hosts a budget tree', async () => {
+    expect(await resolveBudgetBase([])).toBe(DEFAULT_BUDGET_BASE)
+    expect(await resolveBudgetBase(['assets:checking', 'expenses:food', 'income:salary']))
+      .toBe(DEFAULT_BUDGET_BASE)
+  })
+
+  it('derives the base for the default checking account', async () => {
+    expect(await resolveBudgetBase([
+      'assets:checking',
+      'assets:checking:budget:food',
+      'assets:checking:budget:unallocated',
+    ])).toBe('assets:checking')
+  })
+
+  it('derives a non-default base from the budget sub-tree host', async () => {
+    expect(await resolveBudgetBase([
+      'assets:bank:everyday',
+      'assets:bank:everyday:budget:rent',
+      'liabilities:credit-card',
+    ])).toBe('assets:bank:everyday')
+  })
+
+  it('ignores non-asset accounts that happen to contain :budget:', async () => {
+    expect(await resolveBudgetBase([
+      'expenses:budget:weird',
+      'assets:savings:budget:vacation',
+    ])).toBe('assets:savings')
   })
 })
 
@@ -345,8 +429,12 @@ describe('hledger is the sole journal writer', () => {
     expect(fnStart).toBeGreaterThan(-1)
     const fnBody = sourceCode.slice(fnStart)
 
-    // It should use spawn('hledger', ...) for writing
-    expect(fnBody).toContain("spawn('hledger'")
+    // It must delegate to the shared runHledger helper (which is the sole place
+    // that spawns hledger), never write the journal directly. (Issue #4 item 1
+    // moved the spawn out of each caller into runHledger.)
+    expect(fnBody).toContain('runHledger(')
+    // The module's only process-creation primitive is spawn('hledger' ...).
+    expect(sourceCode).toContain("spawn(bin, args)")
 
     // It should NOT contain any fs write operations
     expect(fnBody).not.toContain('writeFile')

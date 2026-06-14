@@ -49,7 +49,7 @@ describe('POST /api/budget/assign', () => {
       description: 'Budget Assignment',
       postings: [
         { account: 'assets:checking:budget:rent', amount: 1200 },
-        { account: 'assets:checking', amount: -1200 },
+        { account: 'assets:checking:budget:unallocated', amount: -1200 },
       ],
     })
     expect(mockSetResponseStatus).toHaveBeenCalledWith(fakeEvent, 201)
@@ -78,11 +78,42 @@ describe('POST /api/budget/assign', () => {
         { account: 'assets:checking:budget:rent', amount: 1200 },
         { account: 'assets:checking:budget:food:groceries', amount: 400 },
         { account: 'assets:checking:budget:transport', amount: 60 },
-        { account: 'assets:checking', amount: -1660 },
+        { account: 'assets:checking:budget:unallocated', amount: -1660 },
       ],
     })
     expect(mockSetResponseStatus).toHaveBeenCalledWith(fakeEvent, 201)
     expect(result).toEqual({ success: true })
+  })
+
+  it('assign (unallocated → envelope) and reduce (envelope → unallocated) are exact inverses', async () => {
+    // Assign $100 to entertainment.
+    mockReadBody.mockResolvedValueOnce({
+      date: '2025-03-01',
+      physicalAccount: 'assets:checking',
+      envelopes: { entertainment: 100 },
+    })
+    mockAppendTransaction.mockResolvedValue(undefined)
+    await budgetAssign(fakeEvent)
+    const assignPostings = mockAppendTransaction.mock.calls[0]![0].postings
+
+    // Reduce $100 from entertainment (budget page uses /transfer to unallocated).
+    mockReadBody.mockResolvedValueOnce({
+      date: '2025-03-02',
+      sourceEnvelope: 'assets:checking:budget:entertainment',
+      destinationEnvelope: 'assets:checking:budget:unallocated',
+      amount: 100,
+    })
+    await budgetTransfer(fakeEvent)
+    const reducePostings = mockAppendTransaction.mock.calls[1]![0].postings
+
+    // Net effect on each account across both transactions must be zero.
+    const net = new Map<string, number>()
+    for (const p of [...assignPostings, ...reducePostings]) {
+      net.set(p.account, (net.get(p.account) ?? 0) + p.amount)
+    }
+    for (const [, amount] of net) expect(amount).toBe(0)
+    // And bare checking is never touched by an assignment.
+    expect(net.has('assets:checking')).toBe(false)
   })
 
   it('returns 400 when date is missing', async () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import fc from 'fast-check'
-import { resolveJournalPath, addTransaction, hledgerExec } from '../hledger'
+import { resolveJournalPath, addTransaction, hledgerExec, transformTransactions, transformBalanceReport } from '../hledger'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
@@ -63,6 +63,43 @@ describe('resolveJournalPath', () => {
       ),
       { numRuns: 100 }
     )
+  })
+})
+
+/**
+ * transformAmount (exercised via transformTransactions / transformBalanceReport)
+ * must prefer the exact decimalMantissa/decimalPlaces representation.
+ */
+describe('amount transform precision', () => {
+  it('derives quantity from decimalMantissa / decimalPlaces', () => {
+    const raw = [{
+      tdate: '2025-01-01',
+      tdescription: 'Test',
+      tindex: 1,
+      tpostings: [{
+        paccount: 'assets:checking',
+        pamount: [{ acommodity: '$', aquantity: { decimalMantissa: 350000, decimalPlaces: 2, floatingPoint: 3500 } }],
+      }],
+    }]
+    const [tx] = transformTransactions(raw)
+    expect(tx.postings[0].amounts[0]).toEqual({ commodity: '$', quantity: 3500 })
+  })
+
+  it('falls back to floatingPoint when mantissa is absent', () => {
+    const report = transformBalanceReport([
+      [['assets:checking', 'checking', 0, [{ acommodity: '$', aquantity: { floatingPoint: 12.34 } }]]],
+      [],
+    ])
+    expect(report.rows[0].amounts[0].quantity).toBeCloseTo(12.34, 2)
+  })
+
+  it('uses mantissa for values where floatingPoint would lose precision', () => {
+    // 9999999.99 — exact via cents, lossy as a parsed double in some paths.
+    const report = transformBalanceReport([
+      [['assets:big', 'big', 0, [{ acommodity: '$', aquantity: { decimalMantissa: 999999999, decimalPlaces: 2, floatingPoint: 9999999.99 } }]]],
+      [],
+    ])
+    expect(report.rows[0].amounts[0].quantity).toBe(9999999.99)
   })
 })
 

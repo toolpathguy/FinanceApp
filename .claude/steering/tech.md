@@ -31,6 +31,14 @@
 - Requires hledger installed locally (`winget install simonmichael.hledger`).
 - Don't add `= $0.00` balance assertions in single-envelope budget assigns —
   hledger rejects the journal. (See design doc "Lessons Learned".)
+- **Writable journal must be a single flat file.** `include` directives are
+  rejected on delete and upload: delete-by-index counts date lines in the master
+  file, which no longer matches hledger's flattened `tindex` once includes are
+  involved (it could delete the wrong transaction).
+- **Money is handled in integer cents at the write boundary** (`journalWriter`):
+  balance validation and amount formatting round to cents, so float drift can't
+  produce an unbalanced journal. Amount transforms read `decimalMantissa`/
+  `decimalPlaces` (exact) in preference to `floatingPoint`.
 
 ## Docs
 - Nuxt 4 / Nuxt UI: prefer the project's Nuxt MCP doc tools when available.

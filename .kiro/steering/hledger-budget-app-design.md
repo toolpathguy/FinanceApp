@@ -183,11 +183,29 @@ When viewing an account's transaction list, each row shows:
 | Date | Payee | Category | Inflow | Outflow | Running Balance |
 |------|-------|----------|--------|---------|-----------------|
 
-- **Payee** comes from the transaction description
-- **Category** is derived from the "other" posting's account name (the one that isn't the current account), with the top-level prefix stripped (e.g., `expenses:groceries` → "Groceries")
-- **Inflow/Outflow** is determined by the sign of the amount on the current account's posting: positive = inflow, negative = outflow (displayed as absolute value)
-- **Running Balance** is a cumulative running total for the account
-- Transfers show the other account name as the payee (e.g., "Transfer: Savings") and have no category
+- The register is **family-aggregated** (`utils/toRegisterRows.ts`): the "account"
+  is the requested account *plus its budget sub-accounts*
+  (`assets:checking` + `assets:checking:budget:*`). Each row nets all family
+  postings in the transaction.
+- **Inflow/Outflow** comes from the sign of that family net (positive = inflow,
+  negative = outflow, shown absolute).
+- **Running Balance** is the cumulative family net, i.e. the **real bank
+  balance** — it reconciles with the balance badge on the account page (which is
+  `hledger bal <account>` totals).
+- **Internal moves are omitted.** A transaction whose family net is `$0` —
+  budget assignment (checking→envelope), envelope-to-envelope transfer, or a
+  credit-card expense that only moves money between envelopes — is not real
+  account activity and does not appear in the register.
+- **Payee/Category** are derived from the postings *outside* the family (the
+  expense/income/other-account leg), prefix stripped (`expenses:groceries` →
+  "Groceries"). Two+ outside postings → "Split".
+- Transfers (outside posting is `assets:`/`liabilities:`) show "Transfer: X" as
+  payee and have no category.
+- A family posting holding 2+ commodities is flagged ("Multiple currencies")
+  rather than silently reduced to its first commodity.
+- Viewing a budget envelope directly (`assets:checking:budget:food`) scopes the
+  family to that sub-tree, so its register shows funding (inflow) and spending
+  (outflow) for that envelope.
 
 ### Account List / Sidebar
 
@@ -202,7 +220,7 @@ The budget page follows YNAB's envelope approach using real hledger sub-accounts
 - **Ready to Assign**: Computed as `net real account balance (checking + savings - credit card) - sum of envelope balances`. Follows YNAB Rule 1: every dollar has a job.
 - **Category Groups**: Groupings of budget categories (e.g., "Food", "Housing", "Entertainment")
 - **Each Category Row**: Shows Assigned (this period) | Activity (spent this period) | Available (cumulative running balance incl. rollover)
-- **Assigned** = period-scoped: derived from budget sub-account period delta + |period activity|
+- **Assigned** = period-scoped: budget sub-account period delta + **signed** period activity (identity: `delta = assigned − spent`, `spent = activity`; using `|activity|` invents a phantom assignment on refunds)
 - **Activity** = period-scoped: expense spending from hledger `bal expenses: -p <period>`
 - **Available** = cumulative: running balance of `assets:checking:budget:{category}` (includes rollover from prior months)
 - **Inline Assignment Editing**: Click the Assigned cell to edit — computes delta from current assigned, creates assignment or transfer transaction
@@ -227,7 +245,7 @@ liabilities:credit-card                      ← liability (included in Ready to
 | User Action | hledger Transaction |
 |---|---|
 | Record income | Credit income, debit checking → then assign to envelopes |
-| Assign to envelope | Transfer from checking to budget sub-account |
+| Assign to envelope | Transfer from `budget:unallocated` (Ready-to-Assign pool) to budget sub-account — inverse of a reduce, so bare checking stays $0 |
 | Record expense (debit) | Debit expense, credit budget sub-account |
 | Record CC expense | 4-posting: expense debit, budget credit, pending CC debit, liability credit |
 | Transfer between envelopes | Transfer between budget sub-accounts |
@@ -307,7 +325,7 @@ Balance report JSON is a tuple `[[rows...], [totals...]]` where each row is `[fu
 | POST | `/api/transactions` | Add transaction — envelope-aware: expenses map to budget sub-accounts, CC expenses generate 4-posting structure | Done |
 | DELETE | `/api/transactions?index=N` | Delete transaction by journal index | Done |
 | GET | `/api/budget?period=` | BudgetEnvelopeReport — YNAB Rule 1 Ready to Assign (all real accounts), period-scoped Assigned/Activity, cumulative Available | Done |
-| POST | `/api/budget/assign` | Create budget assignment transaction (debit checking, credit envelope sub-accounts) | Done |
+| POST | `/api/budget/assign` | Create budget assignment transaction (debit `budget:unallocated` pool, credit envelope sub-accounts) | Done |
 | POST | `/api/budget/transfer` | Transfer money between envelopes (debit source, credit destination) | Done |
 | POST | `/api/categories` | Create expense account groups/envelopes | Done |
 | GET | `/api/hidden-envelopes` | List hidden envelope account paths | Done |
@@ -322,6 +340,34 @@ Balance report JSON is a tuple `[[rows...], [totals...]]` where each row is `[fu
 
 ### hledger add stdin behavior (REPLACED)
 `hledger add` in interactive/stdin mode does NOT reject unbalanced transactions, can't handle balance assertions, and spawns a child process per transaction. Replaced with the direct journal writer (`server/utils/journalWriter.ts`) which validates, formats, and appends directly to the journal file.
+
+### Accounting correctness fixes (GitHub Issue #3)
+A cluster of envelope-model correctness bugs, fixed under
+`.kiro/specs/accounting-correctness/`:
+- **Register pollution** — the real-account register now family-aggregates
+  (account + `:budget:*`) and drops internal moves, so the Balance column is the
+  real bank balance (see "Account Register Display").
+- **Assigned on refunds** — `assigned = delta + activity` with *signed* activity
+  (`server/api/budget.get.ts`); `Math.abs` produced phantom assignments.
+- **Transfer direction** — `toTransactionInput` orients transfer legs by a
+  `direction` field (which inflow/outflow column was filled); receiving a
+  transfer used to be recorded backwards.
+- **Assign vs reduce** — `/api/budget/assign` debits `budget:unallocated`
+  (the Ready-to-Assign pool), making assign and reduce exact inverses and keeping
+  bare checking at $0. (Was debiting bare checking → drift.)
+- **Float money** — `journalWriter` validates balance and formats amounts in
+  integer cents; `transformAmount` reads `decimalMantissa`/`decimalPlaces`.
+- **Multi-commodity** — `utils/singleQuantity.ts` (`MultiCommodityError`) makes
+  multi-commodity accounts fail loudly instead of silently using `amounts[0]`.
+- **Delete-by-index / `include`** — the writable journal must be a single flat
+  file; `include` is rejected on delete and upload (see below).
+
+### Writable journal must be a single flat file (no `include`)
+`transactions.delete.ts` locates transaction N by counting date lines in the
+master file. With `include` directives the file's date-line order no longer
+matches hledger's flattened `tindex`, so a delete could remove the wrong
+transaction. Both `DELETE /api/transactions` and `POST /api/journal/upload`
+reject journals containing `include` (HTTP 422).
 
 ### Windows CRLF in hledger output
 On Windows, `hledger accounts` outputs lines with `\r\n`. The text parser must use `split(/\r?\n/)` and `.map(s => s.trim())` to avoid `\r` characters in account names (which caused `%0D` in URLs).

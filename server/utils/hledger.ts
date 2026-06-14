@@ -46,11 +46,28 @@ export async function hledgerExecText(args: string[]): Promise<string> {
   return stdout
 }
 
-/** Transform a raw hledger amount object to our HledgerAmount interface */
+/**
+ * Transform a raw hledger amount object to our HledgerAmount interface.
+ *
+ * Prefer the exact integer representation (`decimalMantissa` / `decimalPlaces`,
+ * value = mantissa / 10**places) over `floatingPoint`, which is a lossy binary
+ * double. Falls back to `floatingPoint`, then a raw numeric `aquantity`, then 0.
+ */
 function transformAmount(raw: any): { commodity: string; quantity: number } {
+  const q = raw.aquantity
+  let quantity: number
+  if (q && typeof q.decimalMantissa === 'number' && typeof q.decimalPlaces === 'number') {
+    quantity = q.decimalMantissa / 10 ** q.decimalPlaces
+  } else if (q && typeof q.floatingPoint === 'number') {
+    quantity = q.floatingPoint
+  } else if (typeof q === 'number') {
+    quantity = q
+  } else {
+    quantity = 0
+  }
   return {
     commodity: raw.acommodity ?? '',
-    quantity: raw.aquantity?.floatingPoint ?? raw.aquantity ?? 0,
+    quantity,
   }
 }
 

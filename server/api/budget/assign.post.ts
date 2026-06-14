@@ -1,4 +1,5 @@
 import { appendTransaction } from '../../utils/journalWriter'
+import { toUnallocatedAccount } from '../../../utils/budgetAccounts'
 import type { TransactionInput, PostingInput } from '../../../types/api'
 
 interface BudgetAssignRequest {
@@ -42,14 +43,14 @@ export default defineEventHandler(async (event) => {
     totalAssigned += amount
   }
 
-  // Debit the physical account
-  // Note: balance assertion (= $0.00) is NOT included by default.
-  // It should only be used in a full "assign all income" flow where
-  // every dollar is distributed. A single-envelope assignment from
-  // the budget page won't zero out checking, so asserting $0 would
-  // cause hledger to reject the entire journal.
+  // Debit the unallocated pool (Ready-to-Assign), not bare checking. Assigning
+  // moves money out of the pool into envelopes; reducing an assignment returns
+  // it to the pool (budget/transfer → unallocated). Debiting the pool here makes
+  // assign and reduce exact inverses and keeps bare checking at $0.
+  // No balance assertion (= $0.00): a single-envelope assignment won't zero the
+  // pool, so asserting $0 would make hledger reject the journal.
   postings.push({
-    account: body.physicalAccount,
+    account: toUnallocatedAccount(body.physicalAccount),
     amount: -Math.round(totalAssigned * 100) / 100,
   })
 

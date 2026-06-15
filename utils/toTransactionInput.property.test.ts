@@ -90,7 +90,7 @@ describe('toTransactionInput — Property Tests', () => {
 
         expect(result.postings).toHaveLength(2)
 
-        const sum = result.postings[0].amount! + result.postings[1].amount!
+        const sum = result.postings[0]!.amount! + result.postings[1]!.amount!
         expect(Math.abs(sum)).toBeLessThan(1e-10)
       }),
     )
@@ -109,9 +109,9 @@ describe('toTransactionInput — Property Tests', () => {
       fc.property(arbExpenseInput, (input) => {
         const result = toTransactionInput(input)
 
-        expect(result.postings[0].account).toBe(input.category)
-        expect(result.postings[0].account.startsWith('expenses:')).toBe(true)
-        expect(result.postings[1].account).toBe(input.account)
+        expect(result.postings[0]!.account).toBe(input.category)
+        expect(result.postings[0]!.account.startsWith('expenses:')).toBe(true)
+        expect(result.postings[1]!.account).toBe(input.account)
       }),
     )
   })
@@ -121,9 +121,9 @@ describe('toTransactionInput — Property Tests', () => {
       fc.property(arbIncomeInput, (input) => {
         const result = toTransactionInput(input)
 
-        expect(result.postings[0].account).toBe(input.account)
-        expect(result.postings[1].account).toBe(input.category)
-        expect(result.postings[1].account.startsWith('income:')).toBe(true)
+        expect(result.postings[0]!.account).toBe(input.account)
+        expect(result.postings[1]!.account).toBe(input.category)
+        expect(result.postings[1]!.account.startsWith('income:')).toBe(true)
       }),
     )
   })
@@ -133,8 +133,8 @@ describe('toTransactionInput — Property Tests', () => {
       fc.property(arbTransferInput, (input) => {
         const result = toTransactionInput(input)
 
-        expect(result.postings[0].account).toBe(input.transferAccount)
-        expect(result.postings[1].account).toBe(input.account)
+        expect(result.postings[0]!.account).toBe(input.transferAccount)
+        expect(result.postings[1]!.account).toBe(input.account)
       }),
     )
   })
@@ -156,7 +156,7 @@ describe('toTransactionInput — Property Tests', () => {
         const result = toTransactionInput(input)
 
         // Always balanced.
-        expect(result.postings[0].amount! + result.postings[1].amount!).toBe(0)
+        expect(result.postings[0]!.amount! + result.postings[1]!.amount!).toBe(0)
 
         // The current account's signed amount matches the direction.
         const accountPosting = result.postings.find(p => p.account === input.account)!

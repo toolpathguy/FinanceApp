@@ -102,7 +102,7 @@ describe('Round-trip conversion — Property Tests', () => {
         const rows = toRegisterRows([hledgerTx], input.account)
 
         expect(rows).toHaveLength(1)
-        const row = rows[0]
+        const row = rows[0]!
 
         // Verify transfer detection
         expect(row.isTransfer).toBe(input.type === 'transfer')

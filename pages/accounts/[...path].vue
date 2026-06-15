@@ -31,17 +31,17 @@ const loading = computed(() => regStatus.value === 'pending')
 const showModal = ref(false)
 const deleting = ref<number | null>(null)
 
-function editTx(_row: any) {
+function editTx(_index: number) {
   toast.add({ title: 'Edit not yet supported in simplified mode', color: 'warning' })
 }
 
-async function deleteTx(row: { transactionIndex: number }) {
+async function deleteTx(transactionIndex: number) {
   if (!confirm('Delete this transaction? This cannot be undone.')) return
-  deleting.value = row.transactionIndex
+  deleting.value = transactionIndex
   try {
     await $fetch('/api/transactions', {
       method: 'DELETE',
-      query: { index: row.transactionIndex },
+      query: { index: transactionIndex },
     })
     toast.add({ title: 'Transaction deleted', color: 'success' })
     await refreshAll()

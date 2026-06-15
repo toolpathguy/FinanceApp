@@ -110,7 +110,7 @@ describe('Migration: first assignment creates budget sub-accounts', () => {
     // The assignment transaction creates budget sub-accounts by writing postings to them
     // hledger creates accounts on first use — no separate account creation needed
     expect(mockAppendTransaction).toHaveBeenCalledTimes(1)
-    const txInput = mockAppendTransaction.mock.calls[0][0]
+    const txInput = mockAppendTransaction.mock.calls[0]![0]
 
     // Verify budget sub-account postings are present
     expect(txInput.postings).toEqual(

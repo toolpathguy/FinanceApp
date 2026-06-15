@@ -46,7 +46,7 @@ describe('toRegisterRows', () => {
       }),
     ]
 
-    const [row] = toRegisterRows(txs, 'assets:checking')
+    const row = toRegisterRows(txs, 'assets:checking')[0]!
     expect(row.inflow).toBeNull()
     expect(row.outflow).toBe(5)
   })
@@ -62,7 +62,7 @@ describe('toRegisterRows', () => {
       }),
     ]
 
-    const [row] = toRegisterRows(txs, 'assets:checking')
+    const row = toRegisterRows(txs, 'assets:checking')[0]!
     expect(row.inflow).toBe(2000)
     expect(row.outflow).toBeNull()
   })
@@ -93,9 +93,9 @@ describe('toRegisterRows', () => {
     ]
 
     const rows = toRegisterRows(txs, 'assets:checking')
-    expect(rows[0].runningBalance).toBe(-5)
-    expect(rows[1].runningBalance).toBe(1995)
-    expect(rows[2].runningBalance).toBe(1945)
+    expect(rows[0]!.runningBalance).toBe(-5)
+    expect(rows[1]!.runningBalance).toBe(1995)
+    expect(rows[2]!.runningBalance).toBe(1945)
   })
 
   // Issue #4 item 4: a date-filtered register seeds the running balance with the
@@ -147,7 +147,7 @@ describe('toRegisterRows', () => {
       }),
     ]
 
-    const [row] = toRegisterRows(txs, 'assets:checking')
+    const row = toRegisterRows(txs, 'assets:checking')[0]!
     expect(row.isTransfer).toBe(true)
     expect(row.category).toBe('')
     expect(row.payee).toBe('Transfer: Savings')
@@ -164,7 +164,7 @@ describe('toRegisterRows', () => {
       }),
     ]
 
-    const [row] = toRegisterRows(txs, 'assets:checking')
+    const row = toRegisterRows(txs, 'assets:checking')[0]!
     expect(row.isTransfer).toBe(true)
     expect(row.payee).toBe('Transfer: Credit-card')
   })
@@ -180,7 +180,7 @@ describe('toRegisterRows', () => {
       }),
     ]
 
-    const [row] = toRegisterRows(txs, 'assets:checking')
+    const row = toRegisterRows(txs, 'assets:checking')[0]!
     expect(row.isTransfer).toBe(false)
     expect(row.category).toBe('Dining')
     expect(row.categoryRaw).toBe('expenses:dining')
@@ -199,7 +199,7 @@ describe('toRegisterRows', () => {
       }),
     ]
 
-    const [row] = toRegisterRows(txs, 'assets:checking')
+    const row = toRegisterRows(txs, 'assets:checking')[0]!
     expect(row.category).toBe('Split')
     expect(row.categoryRaw).toBe('')
     expect(row.isTransfer).toBe(false)
@@ -234,7 +234,7 @@ describe('toRegisterRows', () => {
 
     const rows = toRegisterRows(txs, 'assets:checking')
     expect(rows).toHaveLength(1)
-    expect(rows[0].inflow).toBe(100)
+    expect(rows[0]!.inflow).toBe(100)
   })
 
   it('preserves transaction metadata (date, index, status)', () => {
@@ -250,7 +250,7 @@ describe('toRegisterRows', () => {
       }),
     ]
 
-    const [row] = toRegisterRows(txs, 'assets:checking')
+    const row = toRegisterRows(txs, 'assets:checking')[0]!
     expect(row.date).toBe('2025-03-20')
     expect(row.transactionIndex).toBe(42)
     expect(row.status).toBe('!')
@@ -276,11 +276,11 @@ describe('toRegisterRows', () => {
 
     const rows = toRegisterRows(txs, 'assets:checking')
     expect(rows).toHaveLength(1)
-    expect(rows[0].outflow).toBe(1200)
-    expect(rows[0].inflow).toBeNull()
-    expect(rows[0].runningBalance).toBe(-1200)
-    expect(rows[0].categoryRaw).toBe('expenses:housing:rent')
-    expect(rows[0].isTransfer).toBe(false)
+    expect(rows[0]!.outflow).toBe(1200)
+    expect(rows[0]!.inflow).toBeNull()
+    expect(rows[0]!.runningBalance).toBe(-1200)
+    expect(rows[0]!.categoryRaw).toBe('expenses:housing:rent')
+    expect(rows[0]!.isTransfer).toBe(false)
   })
 
   it('omits a budget assignment (checking → envelope nets to zero) from the real-account register', () => {
@@ -344,8 +344,8 @@ describe('toRegisterRows', () => {
     const rows = toRegisterRows(txs, 'assets:checking')
     // Assignment (tx 2) is internal → dropped. Salary +2000, Rent -1200.
     expect(rows).toHaveLength(2)
-    expect(rows[0].runningBalance).toBe(2000)
-    expect(rows[1].runningBalance).toBe(800)
+    expect(rows[0]!.runningBalance).toBe(2000)
+    expect(rows[1]!.runningBalance).toBe(800)
   })
 
   it('shows envelope-level activity when viewing a budget sub-account directly (R1.5)', () => {
@@ -362,9 +362,9 @@ describe('toRegisterRows', () => {
 
     const rows = toRegisterRows(txs, 'assets:checking:budget:food')
     expect(rows).toHaveLength(2)
-    expect(rows[0].inflow).toBe(400)   // funded from checking
-    expect(rows[1].outflow).toBe(60)   // spent on groceries
-    expect(rows[1].runningBalance).toBe(340)
+    expect(rows[0]!.inflow).toBe(400)   // funded from checking
+    expect(rows[1]!.outflow).toBe(60)   // spent on groceries
+    expect(rows[1]!.runningBalance).toBe(340)
   })
 
   it('flags a multi-commodity family posting instead of silently dropping a commodity (R6.3)', () => {
@@ -378,7 +378,7 @@ describe('toRegisterRows', () => {
       }),
     ]
 
-    const [row] = toRegisterRows(txs, 'assets:checking')
+    const row = toRegisterRows(txs, 'assets:checking')[0]!
     expect(row.category).toBe('Multiple currencies')
     expect(row.inflow).toBeNull()
     expect(row.outflow).toBeNull()

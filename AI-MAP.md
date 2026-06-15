@@ -16,7 +16,9 @@ living document — update it when the project's shape changes (see
 - `npm run dev` — dev server at http://localhost:3000 (needs hledger on PATH)
 - `npm run test` — `vitest run`
 - `npm run build` / `npm run preview`
-- `npx nuxi typecheck` — root `tsconfig.json` extends `./.nuxt/tsconfig.json`
+- `npx nuxi typecheck` — root `tsconfig.json` extends `./.nuxt/tsconfig.json`.
+  **Clean (0 errors) and CI-gated** via `.github/workflows/ci.yml` (typecheck-only
+  job on push/PR to `main`; no test job yet — Issue #10).
 
 ## Data flow
 `Pages/Components → composables → server/api → server/utils → hledger CLI / .journal`
@@ -106,6 +108,7 @@ RegisterRow, BudgetCategory/Group, BudgetEnvelopeReport, RealAccount, AccountTre
   unbalanced from float drift. Amount transforms prefer `decimalMantissa`/
   `decimalPlaces` over lossy `floatingPoint`.
 - **Writable journal = single flat file** — `include` is rejected on delete/upload.
+- **`AccountRegister` emits `edit`/`delete` with a numeric index** (`row.original.transactionIndex`) — page handlers must accept `number`, not an object. (A prior `deleteTx({ transactionIndex })` mismatch silently sent `index: undefined`; fixed + guarded by the typecheck gate — Issue #10.)
 - **UTree leaf nodes** need `children: undefined` (not `[]`) to be selectable.
 - **UCard slots:** `header` / default / `footer` — there is no `#body`.
 - **tsconfig** must extend `./.nuxt/tsconfig.json` for typecheck.

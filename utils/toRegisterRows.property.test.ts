@@ -173,7 +173,7 @@ describe('toRegisterRows — Property Tests', () => {
         const rows = toRegisterRows(txs, testAccount)
 
         for (let i = 0; i < rows.length; i++) {
-          const row = rows[i]
+          const row = rows[i]!
           const otherAccount = row.categoryRaw
 
           const isRealAccount = otherAccount.startsWith('assets:') || otherAccount.startsWith('liabilities:')

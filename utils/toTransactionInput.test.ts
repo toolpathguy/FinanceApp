@@ -18,7 +18,7 @@ describe('toTransactionInput', () => {
     expect(result.postings).toHaveLength(2)
     expect(result.postings[0]).toEqual({ account: 'expenses:dining', amount: 5, commodity: '$' })
     expect(result.postings[1]).toEqual({ account: 'assets:checking', amount: -5, commodity: '$' })
-    expect(result.postings[0].amount! + result.postings[1].amount!).toBe(0)
+    expect(result.postings[0]!.amount! + result.postings[1]!.amount!).toBe(0)
     expect(result.description).toBe('Coffee Shop')
     expect(result.date).toBe('2025-01-15')
     expect(result.status).toBe('*')
@@ -39,7 +39,7 @@ describe('toTransactionInput', () => {
     expect(result.postings).toHaveLength(2)
     expect(result.postings[0]).toEqual({ account: 'assets:checking', amount: 2000, commodity: '$' })
     expect(result.postings[1]).toEqual({ account: 'income:salary', amount: -2000, commodity: '$' })
-    expect(result.postings[0].amount! + result.postings[1].amount!).toBe(0)
+    expect(result.postings[0]!.amount! + result.postings[1]!.amount!).toBe(0)
     expect(result.description).toBe('Employer')
     expect(result.date).toBe('2025-01-16')
   })
@@ -59,7 +59,7 @@ describe('toTransactionInput', () => {
     expect(result.postings).toHaveLength(2)
     expect(result.postings[0]).toEqual({ account: 'assets:savings', amount: 500, commodity: '$' })
     expect(result.postings[1]).toEqual({ account: 'assets:checking', amount: -500, commodity: '$' })
-    expect(result.postings[0].amount! + result.postings[1].amount!).toBe(0)
+    expect(result.postings[0]!.amount! + result.postings[1]!.amount!).toBe(0)
   })
 
   it('converts an outgoing transfer (direction "out") — money leaves the account', () => {
@@ -76,7 +76,7 @@ describe('toTransactionInput', () => {
     const result = toTransactionInput(input)
     expect(result.postings[0]).toEqual({ account: 'assets:savings', amount: 500, commodity: '$' })
     expect(result.postings[1]).toEqual({ account: 'assets:checking', amount: -500, commodity: '$' })
-    expect(result.postings[0].amount! + result.postings[1].amount!).toBe(0)
+    expect(result.postings[0]!.amount! + result.postings[1]!.amount!).toBe(0)
   })
 
   it('converts an incoming transfer (direction "in") — money enters the account', () => {
@@ -93,7 +93,7 @@ describe('toTransactionInput', () => {
     const result = toTransactionInput(input)
     expect(result.postings[0]).toEqual({ account: 'assets:checking', amount: 500, commodity: '$' })
     expect(result.postings[1]).toEqual({ account: 'assets:savings', amount: -500, commodity: '$' })
-    expect(result.postings[0].amount! + result.postings[1].amount!).toBe(0)
+    expect(result.postings[0]!.amount! + result.postings[1]!.amount!).toBe(0)
   })
 
   it('uses provided commodity and status', () => {
@@ -110,8 +110,8 @@ describe('toTransactionInput', () => {
 
     const result = toTransactionInput(input)
 
-    expect(result.postings[0].commodity).toBe('€')
-    expect(result.postings[1].commodity).toBe('€')
+    expect(result.postings[0]!.commodity).toBe('€')
+    expect(result.postings[1]!.commodity).toBe('€')
     expect(result.status).toBe('!')
   })
 
@@ -127,7 +127,7 @@ describe('toTransactionInput', () => {
 
     const result = toTransactionInput(input)
 
-    expect(result.postings[0].commodity).toBe('$')
+    expect(result.postings[0]!.commodity).toBe('$')
     expect(result.status).toBe('*')
   })
 })

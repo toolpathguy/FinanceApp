@@ -1,4 +1,4 @@
-import { basename, join, resolve, sep } from 'node:path'
+import { win32, join, resolve, sep } from 'node:path'
 
 /**
  * Journal file path safety (Issue #2, R2 — path-traversal prevention).
@@ -29,9 +29,13 @@ export function safeJournalPath(filename: string): string {
     throw createError({ statusCode: 400, statusMessage: 'Filename is required' })
   }
 
-  // basename strips any directory component; if the result differs, the input
-  // contained a separator (`/` or `\`) or a `..`/`.` traversal segment.
-  if (basename(name) !== name) {
+  // win32.basename strips any directory component, treating BOTH `/` and `\`
+  // (and a `C:` drive prefix) as separators. We use the win32 variant rather
+  // than the platform basename on purpose: on POSIX the platform basename keeps
+  // a backslash as an ordinary filename char, so `a\x.journal` would slip
+  // through on Linux while being rejected on Windows. Strict win32 semantics
+  // reject path-bearing names identically on every OS. (CI on Linux exposed this.)
+  if (win32.basename(name) !== name) {
     throw createError({ statusCode: 400, statusMessage: 'Filename must not contain a path' })
   }
 

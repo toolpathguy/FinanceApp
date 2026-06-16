@@ -19,6 +19,20 @@ journal writer), so there is **one** write path, not two. The route keeps an
 explicit `fieldHasIllegalChars` pre-check for a friendly 400; `validateTransaction`
 inside `appendTransaction` is the backstop.
 
+## 1b. Latent bug the new CI job immediately caught
+
+Adding the `test` job paid off on the very first run: it exposed a **real
+cross-platform path-traversal hole** that local Windows runs structurally could
+not catch. `safeJournalPath` (`server/utils/journalFiles.ts`) used the platform
+`basename` to detect path separators. On POSIX that is `path.posix.basename`,
+which treats `\` as an ordinary filename character — so `a\x.journal` was
+rejected on Windows but **accepted on Linux** (the server's likely deployment
+OS). Fix: detect separators with `win32.basename` (strict: `/`, `\`, and `C:`
+drive prefixes) so path-bearing names are rejected identically on every OS. The
+matching test's sanity helper had the same platform dependency and was switched
+to an explicit `/[\\/]/` check; the load-bearing "must throw" assertion was
+unchanged. This is exactly the class of silent gap Issue #11 set out to remove.
+
 ## 2. CI gap closed
 
 Before: `ci.yml` had a `typecheck` job only — **the entire test suite never ran

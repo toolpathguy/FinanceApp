@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // --- Mock Nitro globals ---
 
 const mockHledgerExec = vi.fn()
-const mockAddTransaction = vi.fn()
 const mockAppendTransaction = vi.fn()
 const mockSetResponseStatus = vi.fn()
 const mockReadBody = vi.fn()
@@ -19,7 +18,6 @@ vi.stubGlobal('createError', (opts: { statusCode: number; message: string }) => 
 })
 vi.stubGlobal('setResponseStatus', mockSetResponseStatus)
 vi.stubGlobal('hledgerExec', mockHledgerExec)
-vi.stubGlobal('addTransaction', mockAddTransaction)
 
 // Mock the journalWriter module so appendTransaction is intercepted
 vi.mock('../../utils/journalWriter', () => ({

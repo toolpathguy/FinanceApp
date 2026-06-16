@@ -161,6 +161,32 @@ describe('POST /api/budget/assign', () => {
       statusCode: 400,
     })
   })
+
+  // R6.1: assign routes by the request's physicalAccount, not a fixed default.
+  // A non-default base (e.g. assets:savings) must place both the envelope
+  // posting and the unallocated offset under that base.
+  it('routes postings under a non-default budget base', async () => {
+    mockReadBody.mockResolvedValue({
+      date: '2025-03-01',
+      physicalAccount: 'assets:savings',
+      envelopes: { vacation: 250 },
+    })
+    mockAppendTransaction.mockResolvedValue(undefined)
+
+    const result = await budgetAssign(fakeEvent)
+
+    expect(mockAppendTransaction).toHaveBeenCalledWith({
+      date: '2025-03-01',
+      status: '*',
+      description: 'Budget Assignment',
+      postings: [
+        { account: 'assets:savings:budget:vacation', amount: 250 },
+        { account: 'assets:savings:budget:unallocated', amount: -250 },
+      ],
+    })
+    expect(mockSetResponseStatus).toHaveBeenCalledWith(fakeEvent, 201)
+    expect(result).toEqual({ success: true })
+  })
 })
 
 

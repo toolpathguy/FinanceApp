@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fc from 'fast-check'
-import { basename, join, sep } from 'node:path'
+import { join, sep } from 'node:path'
 
 // createError is a Nitro auto-import at runtime; stub it for unit tests.
 vi.stubGlobal('createError', (opts: { statusCode: number; statusMessage: string }) => {
@@ -71,8 +71,10 @@ describe('safeJournalPath() — property (R2, NFR5)', () => {
       .map(([a, s, b]) => `${a}${s}${b}`)
     fc.assert(
       fc.property(evil, (name) => {
-        // sanity: these names genuinely contain a separator/traversal
-        expect(basename(name) !== name).toBe(true)
+        // sanity: these names genuinely contain a separator/traversal.
+        // Check `/` and `\` explicitly — the platform basename treats `\` as a
+        // normal char on POSIX, which would make this sanity check false-fail.
+        expect(/[\\/]/.test(name)).toBe(true)
         expect(() => safeJournalPath(name)).toThrow()
       }),
       { numRuns: 100 }

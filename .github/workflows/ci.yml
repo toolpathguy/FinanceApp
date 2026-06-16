@@ -25,3 +25,32 @@ jobs:
       # Fails the job on any type error (non-zero exit).
       - name: Typecheck
         run: npx nuxi typecheck
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # hledger must be on PATH for the suite to run for real — without it the
+      # hledger-gated timeout test silently no-ops (the failure mode Issue #11
+      # exists to remove). Installed every run (runners are ephemeral) and NOT
+      # cached: a stale apt cache could reintroduce that silent skip.
+      - name: Install hledger
+        run: sudo apt-get update && sudo apt-get install -y hledger
+
+      # Fail loudly here if the install above silently failed, rather than
+      # letting the gated test skip itself green.
+      - name: Verify hledger is available
+        run: hledger --version
+
+      - name: Test
+        run: npm run test

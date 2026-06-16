@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process'
-import type { TransactionInput } from '../../types/api'
 import { readActiveJournalPath, SAMPLE_JOURNAL } from './activeJournal'
 
 // Re-exported so existing importers of these from hledger.ts keep working.
@@ -176,25 +175,4 @@ export function transformBalanceReport(raw: any): any {
     })),
     totals: (rawTotals ?? []).map(transformAmount),
   }
-}
-
-/** Add a transaction by piping input to hledger add via stdin */
-export async function addTransaction(input: TransactionInput): Promise<void> {
-  const file = resolveJournalPath()
-
-  // Build stdin lines: date, description, then account/amount pairs, end postings, save, quit
-  const lines: string[] = [input.date, input.description]
-  for (const p of input.postings) {
-    lines.push(p.account)
-    if (p.amount !== undefined) {
-      const c = p.commodity ?? '$'
-      lines.push(`${c}${p.amount.toFixed(2)}`)
-    } else {
-      lines.push('')  // accept hledger's inferred amount
-    }
-  }
-  lines.push('.', 'y', '.')  // end postings, confirm save, quit
-
-  const { code, stderr } = await runHledger(['add', '-f', file], lines.join('\n') + '\n')
-  if (code !== 0) throw new Error(`hledger add failed: ${stderr}`)
 }

@@ -66,7 +66,7 @@ rejected on delete and upload**, since they break the date-line ↔ tindex mappi
 ## Server utils (`server/utils/`, Nitro auto-imported)
 - `hledger.ts` — `resolveJournalPath` (precedence: `config/active-journal.json`
   → `LEDGER_FILE` → `test-data/sample.journal`), `hledgerExec`, `hledgerExecText`,
-  `transformTransactions`, `transformBalanceReport`, `addTransaction` (legacy),
+  `transformTransactions`, `transformBalanceReport`,
   `resolveBudgetBase`/`DEFAULT_BUDGET_BASE` (derive the asset account hosting the
   `:budget:` tree, Issue #4). All hledger spawning goes through a private
   `runHledger` helper: rejects on spawn `error`/timeout (`HLEDGER_TIMEOUT_MS`,

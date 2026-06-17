@@ -9,6 +9,38 @@ const exporting = ref(false)
 
 const { data: journalData, refresh: refreshJournals } = useFetch('/api/journal/list')
 
+// AI Assistant API-key config (Issue #8).
+interface AiConfigStatus { configured: boolean, source: 'env' | 'config' | 'none', maskedKey: string | null, hasStoredKey: boolean }
+const { data: aiConfig, refresh: refreshAiConfig } = useFetch<AiConfigStatus>('/api/ai/config')
+const aiKeyInput = ref('')
+const aiKeySaving = ref(false)
+
+async function handleSaveKey() {
+  const key = aiKeyInput.value.trim()
+  if (!key) return
+  aiKeySaving.value = true
+  try {
+    await $fetch('/api/ai/config', { method: 'POST', body: { apiKey: key } })
+    toast.add({ title: 'API key saved', description: 'The budgeting assistant is ready to use.', color: 'success' })
+    aiKeyInput.value = ''
+    await refreshAiConfig()
+  } catch (err: any) {
+    toast.add({ title: 'Error', description: err?.data?.statusMessage || err?.message || 'Failed to save key', color: 'error' })
+  } finally {
+    aiKeySaving.value = false
+  }
+}
+
+async function handleClearKey() {
+  try {
+    await $fetch('/api/ai/config', { method: 'DELETE' })
+    toast.add({ title: 'API key cleared', color: 'success' })
+    await refreshAiConfig()
+  } catch (err: any) {
+    toast.add({ title: 'Error', description: err?.data?.statusMessage || err?.message || 'Failed to clear key', color: 'error' })
+  }
+}
+
 async function handleCreate() {
   let name = newJournalName.value.trim()
   if (!name) return
@@ -162,6 +194,51 @@ function readFileContent(file: File): Promise<string> {
               </div>
             </div>
             <p v-else class="text-sm text-muted italic">No journal files found.</p>
+          </UCard>
+
+          <UCard>
+            <template #header>
+              <div class="flex items-center gap-2">
+                <UIcon name="i-lucide-sparkles" class="size-5" />
+                <span class="font-semibold">AI Assistant</span>
+              </div>
+            </template>
+            <p class="text-sm text-muted mb-3">
+              Set your Anthropic API key to enable the budgeting assistant. It's stored locally in
+              <code>config/ai-config.json</code> (gitignored) and sent only to the Anthropic API.
+            </p>
+
+            <div class="flex items-center gap-2 mb-3 text-sm">
+              <template v-if="aiConfig?.configured">
+                <UIcon name="i-lucide-circle-check" class="size-4 text-success" />
+                <span>Configured <span class="text-muted">({{ aiConfig.maskedKey }})</span></span>
+                <UBadge v-if="aiConfig.source === 'env'" label="from environment" color="neutral" variant="subtle" size="sm" />
+              </template>
+              <template v-else>
+                <UIcon name="i-lucide-circle" class="size-4 text-muted" />
+                <span class="text-muted">Not configured</span>
+              </template>
+            </div>
+
+            <p v-if="aiConfig?.source === 'env'" class="text-xs text-muted mb-3">
+              The <code>ANTHROPIC_API_KEY</code> environment variable is set and takes precedence over a saved key.
+              <template v-if="aiConfig?.hasStoredKey">A saved key is also stored locally (dormant while the env var is set) — use Clear to remove it.</template>
+            </p>
+
+            <div class="flex items-end gap-2">
+              <UFormField label="Anthropic API key" class="flex-1">
+                <UInput v-model="aiKeyInput" type="password" placeholder="sk-ant-..." autocomplete="off" class="w-full" />
+              </UFormField>
+              <UButton label="Save" icon="i-lucide-save" :loading="aiKeySaving" :disabled="!aiKeyInput.trim()" @click="handleSaveKey" />
+              <UButton
+                v-if="aiConfig?.hasStoredKey"
+                label="Clear"
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-trash-2"
+                @click="handleClearKey"
+              />
+            </div>
           </UCard>
 
         </div>

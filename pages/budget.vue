@@ -6,6 +6,9 @@ const toast = useToast()
 const currentPeriod = ref(new Date().toISOString().slice(0, 7))
 const { data: budget, status, refresh } = useBudget(currentPeriod)
 
+// AI budgeting chat (Issue #8) — opens in a slideover; refreshes on commit.
+const showChat = ref(false)
+
 // Group management state
 const showAddGroup = ref(false)
 const newGroupName = ref('')
@@ -258,6 +261,7 @@ async function saveAssignment(cat: BudgetCategory) {
         </template>
         <template #right>
           <UInput v-model="currentPeriod" type="month" class="w-40" />
+          <UButton label="Assistant" icon="i-lucide-sparkles" color="neutral" variant="subtle" @click="showChat = true" />
           <UButton label="Add Group" icon="i-lucide-plus" @click="showAddGroup = true" />
         </template>
       </UDashboardNavbar>
@@ -422,4 +426,11 @@ async function saveAssignment(cat: BudgetCategory) {
       </form>
     </template>
   </UModal>
+
+  <!-- AI Budgeting Assistant (Issue #8) -->
+  <USlideover v-model:open="showChat" title="Budgeting assistant" :ui="{ body: 'p-0' }">
+    <template #body>
+      <AiChatPanel @committed="refresh" />
+    </template>
+  </USlideover>
 </template>

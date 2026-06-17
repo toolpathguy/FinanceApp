@@ -32,21 +32,26 @@ rejected on delete and upload**, since they break the date-line ↔ tindex mappi
 | Route | File | Purpose |
 |---|---|---|
 | `/` | `index.vue` | Dashboard placeholder (hidden from nav) |
-| `/budget` | `budget.vue` | Envelope budget — Ready to Assign, groups, Assigned/Activity/Available, inline assign |
+| `/budget` | `budget.vue` | Envelope budget — Ready to Assign, groups, Assigned/Activity/Available, inline assign. **AI assistant** in a slideover (Issue #8) |
 | `/reports` | `reports.vue` | Placeholder (hidden) |
-| `/settings` | `settings.vue` | Journal mgmt (create/upload/export/list/activate) |
+| `/settings` | `settings.vue` | Journal mgmt (create/upload/export/list/activate) + **AI Assistant** API-key config (Issue #8) |
 | `/accounts` | `accounts/index.vue` | Add/delete real accounts |
 | `/accounts/:path` | `accounts/[...path].vue` | Account register + transaction form |
 
 ## Components / layout
 - `components/AccountRegister.vue` — YNAB register table (Date, Payee, Envelope, Inflow, Outflow, Balance). For a real account the register is **family-aggregated**: rows net the account + its `:budget:*` envelopes, so Balance = the real bank balance and internal moves (assignments, envelope transfers) drop out.
 - `components/SimplifiedTransactionForm.vue` — Add-transaction modal (Account, Payee, Envelope, Inflow/Outflow).
+- `components/AiChatPanel.vue` — AI budgeting chat (Issue #8). Nuxt UI chat input + message bubbles + **proposed-action cards** (Approve/Reject) + persistent data-egress notice + no-API-key empty state. Emits `committed` (budget page refreshes). All logic via `useAiChat`.
 - `layouts/default.vue` — UDashboardGroup + sidebar + real-accounts UTree.
 
 ## Composables (`composables/`) — data fetch
 `useAccounts(type?)`, `useBalances(query?)`, `useBudget(period?)`,
 `useTransactions(query?)` + `useRegister({account})`, `useReports` →
 `useIncomeStatement` / `useBalanceSheet` (placeholder).
+`useAiChat({onCommitted?})` (Issue #8) — client for `/api/ai/chat` + the existing
+assign/transfer endpoints. Holds the opaque Anthropic history; `send`/`approve`/
+`reject`. **Money is committed only here on user approval** (chat route never
+writes); auto-rejects un-acted proposals on a new message.
 
 ## API surface (`server/api/`)
 | Method | Path | Purpose |
@@ -59,6 +64,8 @@ rejected on delete and upload**, since they break the date-line ↔ tindex mappi
 | GET | `/api/budget?period=` | BudgetEnvelopeReport — Ready to Assign, Assigned/Activity/Available |
 | POST | `/api/budget/assign` | Assignment txn (**unallocated pool → envelope**; inverse of reduce) |
 | POST | `/api/budget/transfer` | Move between envelopes |
+| POST | `/api/ai/chat` | AI budgeting chat tool loop (Issue #8). **Never writes** — read tools run server-side; assign/transfer are *proposed* for HITL approval. Stateless (opaque history round-trips). 503 if no key configured |
+| GET·POST·DELETE | `/api/ai/config` | AI key status / save / clear (Issue #8). Returns `{configured, source, maskedKey}` — **never the full key**. Save takes effect with no restart |
 | POST | `/api/categories` | Create expense groups/envelopes |
 | GET·POST | `/api/hidden-envelopes` | List / hide-unhide (zero balance to hide) |
 | * | `/api/journal/{create,upload,export,activate,list}` | Journal file management |
@@ -86,6 +93,27 @@ rejected on delete and upload**, since they break the date-line ↔ tindex mappi
   create/upload/activate; throws 400 on separators/`..`/bad extension).
 - `hledgerArgs.ts` — pure `isValidDate`/`isValidPeriod`/`isValidAccount` (arg-injection
   guards for read-route query params).
+- `budgetReport.ts` — `getBudgetReport(period)` (Issue #8): the envelope-report
+  computation extracted from `budget.get.ts` so the route AND the AI `get_budget`
+  tool share one source (no duplicated accounting).
+- `transactionList.ts` — `getTransactionList(query)`: compact `{date,payee,amount,account}`
+  list for the AI `get_transactions` tool; reuses `hledgerExec`+`transformTransactions`.
+- `anthropic.ts` — shared Anthropic SDK client (`getAnthropic`, `MissingApiKeyError`,
+  `MODEL='claude-opus-4-8'`, `REQUEST_DEFAULTS`: adaptive thinking, effort medium).
+  Key via `resolveApiKey()` = **env override → stored** (`ANTHROPIC_API_KEY` else
+  `config/ai-config.json`); `getApiKeySource()` reports `env`/`config`/`none`.
+  Client rebuilds when the resolved key changes (saving a key needs no restart).
+  Reused by future CSV import (#9).
+- `aiConfig.ts` — owns the gitignored `config/ai-config.json` (Issue #8):
+  `readStoredApiKey` (sync, guarded, never throws — like `activeJournal.ts`),
+  `writeStoredApiKey`/`clearStoredApiKey` (async), `maskApiKey` (last-4). The key
+  is never logged and never returned in full.
+- `aiTools.ts` — AI tool defs + dispatch (Issue #8). `TOOLS` (cache-controlled
+  prefix), `READ_TOOL_HANDLERS` (delegate to budgetReport/transactionList),
+  `isProposedActionTool`, `toProposedAction` (resolves the budget host, builds the
+  assign/transfer payload — **builds a proposal, never writes**).
+- `server/ai/budgetInstructions.ts` — `BUDGET_SYSTEM_PROMPT` (cached system prefix:
+  YNAB Rule 1, envelope conventions, propose-never-execute, tone).
 
 ## Pure utils (`utils/`) — property-tested
 `formatAmount`, `stripAccountPrefix`, `buildAccountTree`, `filterAccounts`
@@ -100,7 +128,10 @@ silently dropping commodities), `validateTransactionForm` (legacy).
 ## Types (`types/`)
 `hledger.ts` (HledgerAmount/Posting/Transaction), `api.ts` (TransactionInput,
 PostingInput, BalanceQuery, TransactionQuery), `ui.ts` (SimplifiedTransactionInput,
-RegisterRow, BudgetCategory/Group, BudgetEnvelopeReport, RealAccount, AccountTreeItem).
+RegisterRow, BudgetCategory/Group, BudgetEnvelopeReport, RealAccount, AccountTreeItem),
+`ai.ts` (Issue #8: AssignProposalPayload, TransferProposalPayload, ProposedAction,
+ChatResolution, AiChatRequest/Response, ChatDisplayMessage — `messages` is opaque
+Anthropic `MessageParam[]`, cast at the SDK boundary in `chat.post.ts`).
 
 ## Known quirks / gotchas
 - **Windows CRLF:** hledger text output → `split(/\r?\n/)` + trim, else `\r` leaks (`%0D` in URLs).
@@ -122,6 +153,17 @@ RegisterRow, BudgetCategory/Group, BudgetEnvelopeReport, RealAccount, AccountTre
   via `hledgerArgs` and account queries are passed after a `--` separator.
 - **Active journal** is persisted to `config/active-journal.json` (gitignored),
   not `process.env` — set by `journal/activate.post`, read by `resolveJournalPath`.
+- **AI chat (Issue #8) — HITL invariant:** `/api/ai/chat` NEVER writes the journal.
+  Read tools (`get_budget`/`get_transactions`) run server-side; assign/transfer are
+  *proposed* and surfaced for approval — only the existing `budget/assign|transfer`
+  endpoints (called by `useAiChat` after the user clicks Approve) write. Guarded by
+  `chat.post.test.ts` (asserts the journal writer is called 0×). API key via
+  `resolveApiKey()` = `ANTHROPIC_API_KEY` env **override** → in-app key in
+  gitignored `config/ai-config.json` (set on the Settings page, no restart);
+  server-only, never logged, never returned in full (masked last-4). Model
+  `claude-opus-4-8`, non-streaming, manual tool loop (capped at 8 iterations).
+  **Data egress:** chat + budget data go to the Anthropic API (the one external
+  flow); the panel shows a persistent notice.
 - **Robustness (Issue #4):** hledger spawns time out / reject (never hang) via
   `runHledger`; simplified `POST /api/transactions` rejects non-positive/non-finite
   amounts; the budget base is **derived** (`resolveBudgetBase`), not hardcoded

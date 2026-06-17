@@ -1,4 +1,5 @@
 import { appendTransaction } from '../../utils/journalWriter'
+import { READY_TO_ASSIGN_EPSILON } from '../../utils/budgetData'
 import { toUnallocatedAccount } from '../../../utils/budgetAccounts'
 import type { TransactionInput, PostingInput } from '../../../types/api'
 
@@ -41,6 +42,20 @@ export default defineEventHandler(async (event) => {
       amount,
     })
     totalAssigned += amount
+  }
+
+  // Availability gate (GitHub Issue #7): you can't assign money that doesn't
+  // exist. "Money that exists" is Ready to Assign — net worth across ALL real
+  // accounts minus envelopes — so savings-held funds count even when the host
+  // account is empty; the check is the net-worth pool, never a single account.
+  // Overspending an envelope stays allowed and is covered via budget transfers;
+  // only assigning beyond the pool is rejected.
+  const available = await getReadyToAssign()
+  if (totalAssigned > available + READY_TO_ASSIGN_EPSILON) {
+    throw createError({
+      statusCode: 400,
+      message: `Can't assign $${totalAssigned.toFixed(2)} — only $${Math.max(0, available).toFixed(2)} left to assign.`,
+    })
   }
 
   // Debit the unallocated pool (Ready-to-Assign), not bare checking. Assigning

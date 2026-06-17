@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fc from 'fast-check'
 import { resolveBudgetBase } from '../../utils/hledger'
+import { getReadyToAssign } from '../../utils/budgetData'
 
 // --- Mock Nitro globals ---
 
@@ -15,6 +16,7 @@ vi.stubGlobal('hledgerExec', mockHledgerExec)
 vi.stubGlobal('hledgerExecText', mockHledgerExecText)
 vi.stubGlobal('transformBalanceReport', mockTransformBalanceReport)
 vi.stubGlobal('resolveBudgetBase', resolveBudgetBase)
+vi.stubGlobal('getReadyToAssign', getReadyToAssign)
 
 vi.mock('node:fs/promises', () => ({
   readFile: vi.fn(),

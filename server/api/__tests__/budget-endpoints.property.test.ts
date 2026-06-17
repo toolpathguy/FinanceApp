@@ -6,6 +6,7 @@ import fc from 'fast-check'
 const mockAppendTransaction = vi.fn()
 const mockSetResponseStatus = vi.fn()
 const mockReadBody = vi.fn()
+const mockGetReadyToAssign = vi.fn()
 
 vi.stubGlobal('defineEventHandler', (handler: Function) => handler)
 vi.stubGlobal('readBody', mockReadBody)
@@ -15,6 +16,9 @@ vi.stubGlobal('createError', (opts: { statusCode: number; message: string }) => 
   return err
 })
 vi.stubGlobal('setResponseStatus', mockSetResponseStatus)
+// Keep the assign pool unlimited so these property tests aren't gated by
+// availability (the gate has dedicated tests in budget-assign.test.ts).
+vi.stubGlobal('getReadyToAssign', mockGetReadyToAssign)
 
 vi.mock('../../utils/journalWriter', () => ({
   appendTransaction: (...args: any[]) => mockAppendTransaction(...args),
@@ -26,6 +30,7 @@ const fakeEvent = {} as any
 beforeEach(() => {
   vi.clearAllMocks()
   mockAppendTransaction.mockResolvedValue(undefined)
+  mockGetReadyToAssign.mockResolvedValue(Number.POSITIVE_INFINITY)
 })
 
 // --- Arbitrary Helpers ---

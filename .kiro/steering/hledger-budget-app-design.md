@@ -240,6 +240,32 @@ assets:savings                               ← physical account (included in R
 liabilities:credit-card                      ← liability (included in Ready to Assign)
 ```
 
+### Budget availability & single-host model (decision — Issue #7)
+
+The budget tree hangs off a **single host account** (`resolveBudgetBase` →
+`<base>:budget:*`, default `assets:checking`). This is intentional and is **not**
+going to become multi-account envelope hosting — that larger model change is not a
+goal. The decisions:
+
+- **Money can physically live anywhere.** "Ready to Assign" is net worth across
+  **all** real accounts (assets + liabilities) − envelopes, so funds held in
+  savings count toward what can be assigned even when checking is empty. There is
+  no need to host envelopes on multiple accounts to budget money that sits in
+  savings.
+- **You can't assign money that doesn't exist.** Assignment is **capped at Ready
+  to Assign** — enforced server-side in `budget/assign.post.ts` via the shared
+  `getReadyToAssign()` (`server/utils/budgetData.ts`), the single source of truth
+  also used by `GET /api/budget`. An over-assignment is rejected (400) and nothing
+  is written. The gate is the net-worth pool, never a single account's balance.
+- **Overspending an envelope is allowed.** Spending past an envelope's balance
+  drives its Available negative (shown red); cover it by **moving funds from
+  another envelope** (`budget/transfer.post.ts`). Transfers are never gated — they
+  reshuffle existing money, they don't create it.
+- **A negative `…:budget:unallocated` is correct and intentionally not surfaced.**
+  Assigning savings-backed money debits the host's unallocated pool below zero
+  even though net worth covers it (Ready to Assign stays ≥ 0). This is numerically
+  correct; the UI does not render a per-host unallocated balance, by design.
+
 ### Envelope Transaction Types
 
 | User Action | hledger Transaction |

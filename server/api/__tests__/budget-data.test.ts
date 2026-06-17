@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { resolveBudgetBase } from '../../utils/hledger'
+import { getReadyToAssign } from '../../utils/budgetData'
 
 // --- Mock Nitro globals ---
 
@@ -16,6 +17,9 @@ vi.stubGlobal('transformBalanceReport', mockTransformBalanceReport)
 // Real implementation: pure when given the account list budget.get.ts passes,
 // so it derives the base from the mocked accounts (Issue #4 item 3).
 vi.stubGlobal('resolveBudgetBase', resolveBudgetBase)
+// Real RTA util: budget.get.ts hands it the already-fetched base + cumulative
+// report, so it only issues the real-balance read the suite already mocks.
+vi.stubGlobal('getReadyToAssign', getReadyToAssign)
 
 // Mock fs used by loadHiddenEnvelopes / pathExists — no hidden-envelopes file.
 vi.mock('node:fs/promises', () => ({

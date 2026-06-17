@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const mockAppendTransaction = vi.fn()
 const mockSetResponseStatus = vi.fn()
 const mockReadBody = vi.fn()
+const mockGetReadyToAssign = vi.fn()
 
 vi.stubGlobal('defineEventHandler', (handler: Function) => handler)
 vi.stubGlobal('readBody', mockReadBody)
@@ -14,6 +15,9 @@ vi.stubGlobal('createError', (opts: { statusCode: number; message: string }) => 
   return err
 })
 vi.stubGlobal('setResponseStatus', mockSetResponseStatus)
+// The assign availability gate is exercised in budget-assign.test.ts; here we
+// keep the pool effectively unlimited so these mechanics tests aren't gated.
+vi.stubGlobal('getReadyToAssign', mockGetReadyToAssign)
 
 vi.mock('../../utils/journalWriter', () => ({
   appendTransaction: (...args: any[]) => mockAppendTransaction(...args),
@@ -26,6 +30,7 @@ const fakeEvent = {} as any
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockGetReadyToAssign.mockResolvedValue(Number.POSITIVE_INFINITY)
 })
 
 /**

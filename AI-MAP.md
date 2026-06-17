@@ -77,6 +77,9 @@ rejected on delete and upload**, since they break the date-line ↔ tindex mappi
   in request handlers, Issue #4).
 - `activeJournal.ts` — owns reading `config/active-journal.json` (`readActiveJournalPath`)
   + the `SAMPLE_JOURNAL`/`ACTIVE_JOURNAL_CONFIG` constants (kept out of `hledger.ts`).
+- `budgetData.ts` — `getReadyToAssign` (YNAB Rule 1: net worth − envelopes) +
+  `READY_TO_ASSIGN_EPSILON`. Single source of truth for "Ready to Assign", shared
+  by `GET /api/budget` and the `budget/assign` availability gate (Issue #7).
 - `journalWriter.ts` — `validateTransaction`, `formatTransaction`, `appendTransaction`,
   `fieldHasIllegalChars` (rejects `\r\n\t` in free-text fields — journal-injection guard).
 - `journalFiles.ts` — `JOURNALS_DIR`, `safeJournalPath` (path-traversal guard for

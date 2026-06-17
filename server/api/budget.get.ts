@@ -66,7 +66,6 @@ export default defineEventHandler(async (event) => {
   //    c) Real account totals → compute Ready to Assign via YNAB Rule 1
   const budgetBalanceMap = new Map<string, number>()   // cumulative Available
   const budgetPeriodDeltaMap = new Map<string, number>() // period net change
-  let totalBudgetEnvelopes = 0  // sum of all non-unallocated budget sub-accounts
   let readyToAssign = 0
 
   try {
@@ -75,42 +74,21 @@ export default defineEventHandler(async (event) => {
     const cumulativeRaw = await hledgerExec(cumulativeArgs)
     const cumulativeReport = transformBalanceReport(cumulativeRaw)
 
-    let totalAllBudgetSubAccounts = 0
     for (const row of cumulativeReport.rows) {
       const account = row.account as string
-      const balance = singleQuantity(row.amounts, `budget balance for ${account}`)
-
-      if (account.startsWith(budgetPrefix)) {
-        totalAllBudgetSubAccounts += balance
-        if (account !== unallocatedAccount
-          && !account.startsWith(pendingPrefix)) {
-          const categoryKey = account.slice(budgetPrefix.length)
-          budgetBalanceMap.set(categoryKey, balance)
-          totalBudgetEnvelopes += balance
-        }
+      if (account.startsWith(budgetPrefix)
+        && account !== unallocatedAccount
+        && !account.startsWith(pendingPrefix)) {
+        const categoryKey = account.slice(budgetPrefix.length)
+        budgetBalanceMap.set(categoryKey, singleQuantity(row.amounts, `budget balance for ${account}`))
       }
     }
 
-    // YNAB Rule 1: Ready to Assign = total real account balances - money in envelopes
-    // Real accounts = assets + liabilities (net worth)
-    // Money in envelopes = all budget sub-accounts except unallocated
-    // So: Ready to Assign = net worth - (total envelopes + pending CC)
-    // Which simplifies to: unallocated balance (since checking = sum of all budget sub-accounts)
-    // Plus savings, minus credit card liability, etc.
-    //
-    // Actually the simplest correct formula:
-    // Ready to Assign = sum(all real accounts: assets + liabilities) - sum(all non-unallocated budget sub-accounts)
-    // This accounts for savings, credit cards, and any other real accounts.
-    const realBalArgs = ['bal', 'assets:', 'liabilities:']
-    const realBalRaw = await hledgerExec(realBalArgs)
-    const realBalReport = transformBalanceReport(realBalRaw)
-    const netRealBalance = singleQuantity(realBalReport.totals, 'net real account balance')
-
-    // Subtract all envelope balances (including pending CC) from net real balance
-    const unallocatedRow = cumulativeReport.rows.find((r: any) => r.account === unallocatedAccount)
-    const envelopesAndPending = totalAllBudgetSubAccounts
-      - singleQuantity(unallocatedRow?.amounts, 'unallocated balance')
-    readyToAssign = netRealBalance - envelopesAndPending
+    // Ready to Assign (YNAB Rule 1) = net worth − money in envelopes. The single
+    // source of truth lives in server/utils/budgetData.ts and is shared with the
+    // assign availability gate, so the report and the gate can never disagree.
+    // Pass the data we already fetched so this adds only the real-balance read.
+    readyToAssign = await getReadyToAssign({ budgetBase, cumulativeReport })
 
     // b) Period-scoped delta — net change in budget sub-accounts this period
     if (pd) {

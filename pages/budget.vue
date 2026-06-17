@@ -177,6 +177,18 @@ async function saveAssignment(cat: BudgetCategory) {
     return
   }
 
+  // Can't assign money that doesn't exist (Issue #7). Block over-assignment for
+  // instant feedback; the server gate stays authoritative. Reductions (delta < 0)
+  // and transfers are never gated.
+  if (delta > 0 && budget.value && delta > budget.value.readyToAssign + 0.005) {
+    toast.add({
+      title: 'Not enough to assign',
+      description: `Only ${formatCurrency(budget.value.readyToAssign)} left to assign.`,
+      color: 'error',
+    })
+    return
+  }
+
   const envelopeKey = cat.accountPath.replace(/^expenses:/, '')
   const budgetAccount = `assets:checking:budget:${envelopeKey}`
   const today = new Date().toISOString().slice(0, 10)

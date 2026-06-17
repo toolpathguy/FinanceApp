@@ -12,6 +12,7 @@ const mockTransformBalanceReport = vi.fn()
 const mockGetQuery = vi.fn()
 const mockReadBody = vi.fn()
 const mockSetResponseStatus = vi.fn()
+const mockGetReadyToAssign = vi.fn()
 
 vi.stubGlobal('defineEventHandler', (handler: Function) => handler)
 vi.stubGlobal('getQuery', mockGetQuery)
@@ -26,6 +27,10 @@ vi.stubGlobal('hledgerExec', mockHledgerExec)
 vi.stubGlobal('hledgerExecText', mockHledgerExecText)
 vi.stubGlobal('transformBalanceReport', mockTransformBalanceReport)
 vi.stubGlobal('resolveBudgetBase', resolveBudgetBase)
+// The GET test here hits the no-budget-accounts path (RTA never reached); the
+// assign test isn't about the gate — keep the pool unlimited. The real
+// getReadyToAssign is covered in budget-assign.test.ts / budget-data.test.ts.
+vi.stubGlobal('getReadyToAssign', mockGetReadyToAssign)
 
 vi.mock('node:fs', () => ({ existsSync: () => false }))
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -52,6 +57,7 @@ const fakeEvent = {} as any
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockGetReadyToAssign.mockResolvedValue(Number.POSITIVE_INFINITY)
 })
 
 /**

@@ -34,6 +34,7 @@ function titleCaseTree(items: AccountTreeItem[]): AccountTreeItem[] {
 
 const links: NavigationMenuItem[][] = [[
   { label: 'Budget', icon: 'i-lucide-target', to: '/budget' },
+  { label: 'Import', icon: 'i-lucide-file-up', to: '/import' },
 ]]
 
 const settingsLinks: NavigationMenuItem[][] = [[
